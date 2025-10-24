@@ -4684,22 +4684,39 @@ engine_dir: "./engines/td"
         # Pre-VAE feedback loop
         use_image_feedback = (hasattr(self.ownerComp.par, 'Useprefxfeedback') and
                               self.ownerComp.par.Useprefxfeedback.eval())
+        use_color_correction_feedback = (hasattr(self.ownerComp.par, 'Usecolorcorrectionfeedback') and
+                                        self.ownerComp.par.Usecolorcorrectionfeedback.eval())
 
-        if use_image_feedback:
+        if use_image_feedback or use_color_correction_feedback:
             yaml_content += """# Multi-stage Image Preprocessing (Pre-Fx)
 image_preprocessing:
   enabled: true
   processors:
 """
-            params = self.gather_fx_parameters_for_processor('feedback_transform')
-            yaml_content += f'    - type: "feedback_transform"\n'
-            yaml_content += f'      order: 1\n'
-            yaml_content += f'      enabled: true\n'
-            yaml_content += f'      params:\n'
-            # CRITICAL: Force sync processing to avoid 1-frame delay from pipelined orchestrator
-            yaml_content += f'        requires_sync_processing: true\n'
-            for param_name, param_value in params.items():
-                yaml_content += f'        {param_name}: {param_value}\n'
+            processor_order = 1
+
+            if use_image_feedback:
+                params = self.gather_fx_parameters_for_processor('feedback_transform')
+                yaml_content += f'    - type: "feedback_transform"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                # CRITICAL: Force sync processing to avoid 1-frame delay from pipelined orchestrator
+                yaml_content += f'        requires_sync_processing: true\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
+                processor_order += 1
+
+            if use_color_correction_feedback:
+                params = self.gather_fx_parameters_for_processor('color_correction_feedback')
+                yaml_content += f'    - type: "color_correction_feedback"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                # CRITICAL: Force sync processing to avoid 1-frame delay from pipelined orchestrator
+                yaml_content += f'        requires_sync_processing: true\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
         else:
             yaml_content += """# Multi-stage Image Preprocessing (disabled)
 # image_preprocessing:
@@ -5933,6 +5950,11 @@ td_settings:
         """Called when Useprefxfeedback toggle changes - updates Fx dynamic parameters"""
         self.update_fx_dynamic_parameters()
 
+    def Usecolorcorrectionfeedback(self):
+        self.logger.log('Usecolorcorrectionfeedback changed', level='INFO')
+        """Called when Usecolorcorrectionfeedback toggle changes - updates Fx dynamic parameters"""
+        self.update_fx_dynamic_parameters()
+
     def Fxparameterupdate(self, par):
         """
         Generic callback for ALL Fx* dynamic parameters.
@@ -6470,7 +6492,7 @@ td_settings:
     def update_fx_dynamic_parameters(self):
         if not self.ownerComp.par.Updatefxpars.eval():
             return
-        """Updates Fx* parameters for feedback_transform (image), latent_feedback, and latent_transform on Fx page"""
+        """Updates Fx* parameters for feedback_transform (image), latent_feedback, latent_transform, and color_correction_feedback on Fx page"""
         active_fx = []
         if hasattr(self.ownerComp.par, 'Useprefxfeedback') and self.ownerComp.par.Useprefxfeedback.eval():
             active_fx.append('feedback_transform')
@@ -6478,6 +6500,8 @@ td_settings:
             active_fx.append('latent_feedback')
         if hasattr(self.ownerComp.par, 'Uselatenttransform') and self.ownerComp.par.Uselatenttransform.eval():
             active_fx.append('latent_transform')
+        if hasattr(self.ownerComp.par, 'Usecolorcorrectionfeedback') and self.ownerComp.par.Usecolorcorrectionfeedback.eval():
+            active_fx.append('color_correction_feedback')
 
         # Remove old Fx* params
         for par_tuple in self.ownerComp.customPars:

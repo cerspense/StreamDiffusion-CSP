@@ -222,3 +222,29 @@ controlnet_test_*
 
 # Demo uploads directory
 demo/realtime-img2img/uploads/
+Install_StreamDiffusion.bat
+Install_TensorRT.bat
+Start_StreamDiffusion.bat
+StreamDiffusionTD/attention_processor.py
+.gitignore
+StreamDiffusionTD/daydream_client.py
+StreamDiffusionTD/daydream_manager.py
+StreamDiffusionTD/install_tensorrt.py
+StreamDiffusionTD/ndi_utils.py
+.gitignore
+StreamDiffusionTD/pipeline_td.py
+.gitignore
+StreamDiffusionTD/requirements_daydream.txt
+StreamDiffusionTD/requirements_mac.txt
+StreamDiffusionTD/requirements_pc.txt
+StreamDiffusionTD/syphon_utils.py
+StreamDiffusionTD/td_config.yaml
+StreamDiffusionTD/td_main.py
+StreamDiffusionTD/td_manager.py
+StreamDiffusionTD/td_osc_handler.py
+StreamDiffusionTD/v2v_utils.py
+StreamDiffusionTD/webrtc_player.html
+StreamDiffusionTD/working_models.json
+StreamDiffusionTD/wrapper_td.py
+3.20.2
+StreamDiffusionTD/nul

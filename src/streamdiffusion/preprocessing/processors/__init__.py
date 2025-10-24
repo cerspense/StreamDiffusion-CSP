@@ -15,6 +15,7 @@ from .feedback import FeedbackPreprocessor
 from .feedback_transform import FeedbackTransformPreprocessor
 from .latent_feedback import LatentFeedbackPreprocessor
 from .latent_transform import LatentTransformPreprocessor
+from .latent_transform_cc import LatentTransformCCPreprocessor
 from .sharpen import SharpenPreprocessor
 from .upscale import UpscalePreprocessor
 from .blur import BlurPreprocessor
@@ -72,6 +73,7 @@ _preprocessor_registry = {
     "feedback_transform": FeedbackTransformPreprocessor,
     "latent_feedback": LatentFeedbackPreprocessor,
     "latent_transform": LatentTransformPreprocessor,
+    "latent_transform_cc": LatentTransformCCPreprocessor,
     "sharpen": SharpenPreprocessor,
     "upscale": UpscalePreprocessor,
     "blur": BlurPreprocessor,
@@ -176,6 +178,7 @@ __all__ = [
     "FeedbackTransformPreprocessor",
     "LatentFeedbackPreprocessor",
     "LatentTransformPreprocessor",
+    "LatentTransformCCPreprocessor",
     "ColorCorrectionFeedbackPreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",

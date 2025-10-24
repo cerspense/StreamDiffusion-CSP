@@ -133,6 +133,11 @@ class ColorCorrectionFeedbackPreprocessor(PipelineAwareProcessor):
         self.gamma = gamma
         self._first_frame = True
 
+        # DEBUG: Frame tracking
+        self._frame_count = 0
+        self._prev_frame_hash = None
+        self._debug = True  # Enable debug logging
+
     def reset(self):
         """Reset the processor state (useful for new sequences)"""
         self._first_frame = True
@@ -141,8 +146,24 @@ class ColorCorrectionFeedbackPreprocessor(PipelineAwareProcessor):
         """Get previous frame image data from pipeline"""
         if self.pipeline_ref is not None:
             if hasattr(self.pipeline_ref, 'prev_image_result'):
-                if self.pipeline_ref.prev_image_result is not None and not self._first_frame:
-                    return self.pipeline_ref.prev_image_result
+                prev = self.pipeline_ref.prev_image_result
+
+                # DEBUG: Track frame info
+                if self._debug and prev is not None:
+                    # Calculate simple hash of tensor data to track frame changes
+                    frame_hash = hash(prev.cpu().numpy().tobytes()[:1000]) if hasattr(prev, 'cpu') else None
+
+                    if self._prev_frame_hash is not None:
+                        if frame_hash == self._prev_frame_hash:
+                            print(f"[ColorCorrection] Frame {self._frame_count}: SAME PREV FRAME (oscillation!)")
+                        else:
+                            print(f"[ColorCorrection] Frame {self._frame_count}: New prev frame")
+
+                    print(f"[ColorCorrection] Frame {self._frame_count}: prev shape={prev.shape}, hash={frame_hash}, first={self._first_frame}")
+                    self._prev_frame_hash = frame_hash
+
+                if prev is not None and not self._first_frame:
+                    return prev
         return None
 
     def _apply_color_correction_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -266,11 +287,19 @@ class ColorCorrectionFeedbackPreprocessor(PipelineAwareProcessor):
         Returns:
             Blended tensor with color correction feedback
         """
+        # DEBUG: Track processing
+        self._frame_count += 1
+        if self._debug:
+            input_hash = hash(tensor.cpu().numpy().tobytes()[:1000]) if hasattr(tensor, 'cpu') else None
+            print(f"[ColorCorrection] Processing frame {self._frame_count}, input hash={input_hash}")
+
         # Get previous output
         prev_output = self._get_previous_data()
 
         if prev_output is None:
             # First frame
+            if self._debug:
+                print(f"[ColorCorrection] Frame {self._frame_count}: NO PREV (first frame or None)")
             self._first_frame = False
             if tensor.dim() == 3:
                 tensor = tensor.unsqueeze(0)
@@ -316,6 +345,11 @@ class ColorCorrectionFeedbackPreprocessor(PipelineAwareProcessor):
             blended = blended.unsqueeze(0)
 
         blended = blended.to(device=self.device, dtype=self.dtype)
+
+        # DEBUG: Track output
+        if self._debug:
+            output_hash = hash(blended.cpu().numpy().tobytes()[:1000]) if hasattr(blended, 'cpu') else None
+            print(f"[ColorCorrection] Frame {self._frame_count}: OUTPUT hash={output_hash}, strength={self.feedback_strength}")
 
         self._first_frame = False
         return blended

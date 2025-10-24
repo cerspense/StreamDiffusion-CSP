@@ -12,11 +12,14 @@ from .hed import HEDPreprocessor
 from .ipadapter_embedding import IPAdapterEmbeddingPreprocessor
 from .faceid_embedding import FaceIDEmbeddingPreprocessor
 from .feedback import FeedbackPreprocessor
+from .feedback_transform import FeedbackTransformPreprocessor
 from .latent_feedback import LatentFeedbackPreprocessor
+from .latent_transform import LatentTransformPreprocessor
 from .sharpen import SharpenPreprocessor
 from .upscale import UpscalePreprocessor
 from .blur import BlurPreprocessor
 from .realesrgan_trt import RealESRGANProcessor
+from .color_correction import ColorCorrectionPreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
 try:
@@ -66,12 +69,15 @@ _preprocessor_registry = {
     "soft_edge": SoftEdgePreprocessor,
     "hed": HEDPreprocessor,
     "feedback": FeedbackPreprocessor,
+    "feedback_transform": FeedbackTransformPreprocessor,
     "latent_feedback": LatentFeedbackPreprocessor,
+    "latent_transform": LatentTransformPreprocessor,
     "sharpen": SharpenPreprocessor,
     "upscale": UpscalePreprocessor,
     "blur": BlurPreprocessor,
     "realesrgan_trt": RealESRGANProcessor,
-}   
+    "color_correction": ColorCorrectionPreprocessor,
+}
 
 # Add TensorRT preprocessors if available
 if DEPTH_TENSORRT_AVAILABLE:
@@ -167,7 +173,10 @@ __all__ = [
     "IPAdapterEmbeddingPreprocessor",
     "FaceIDEmbeddingPreprocessor",
     "FeedbackPreprocessor",
+    "FeedbackTransformPreprocessor",
     "LatentFeedbackPreprocessor",
+    "LatentTransformPreprocessor",
+    "ColorCorrectionPreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",
     "register_preprocessor",

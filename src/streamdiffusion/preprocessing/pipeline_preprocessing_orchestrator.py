@@ -20,23 +20,35 @@ class PipelinePreprocessingOrchestrator(BaseOrchestrator[torch.Tensor, torch.Ten
     def __init__(self, device: str = "cuda", dtype: torch.dtype = torch.float16, max_workers: int = 4, pipeline_ref: Optional[Any] = None):
         # Pipeline preprocessing: 10ms timeout for responsive processing
         super().__init__(device, dtype, max_workers, timeout_ms=10.0, pipeline_ref=pipeline_ref)
-        
+
         # Pipeline preprocessing specific state
         self._current_input_tensor = None  # For BaseOrchestrator fallback logic
+
+        # Cache for pipeline-aware processor detection (avoid hot path checks)
+        self._processors_cache_key = None
+        self._has_sync_required_cache = False
     
     def _should_use_sync_processing(self, *args, **kwargs) -> bool:
         """
         Determine if synchronous processing should be used instead of pipelined.
-        
-        For pipeline preprocessing, we typically use pipelined processing since most
-        pipeline preprocessors are stateless and don't have temporal feedback requirements.
-        
+
+        Checks for pipeline-aware preprocessors (feedback, temporal, etc.) that require
+        synchronous processing to avoid temporal artifacts and ensure access to previous
+        pipeline outputs.
+
+        Args:
+            *args: Arguments from process_pipelined call (processors is first argument)
+            **kwargs: Keyword arguments
+
         Returns:
-            False - pipeline preprocessing can typically always use pipelined processing
+            True if pipeline-aware preprocessors detected, False otherwise
         """
-        # Pipeline preprocessing generally doesn't require sync processing
-        # Most processors are stateless and work well with pipelining
-        return False
+        # Extract processors from args - they're the first argument after input_tensor
+        if len(args) < 1:
+            return False
+
+        processors = args[0]  # processors is first arg after input_tensor
+        return self._check_pipeline_aware_cached(processors)
     
     def process_pipelined(self, 
                         input_tensor: torch.Tensor,
@@ -171,6 +183,60 @@ class PipelinePreprocessingOrchestrator(BaseOrchestrator[torch.Tensor, torch.Ten
             logger.error(f"PipelinePreprocessingOrchestrator: Processor failed: {e}")
             return input_tensor  # Return original on error
     
+    def _check_pipeline_aware_cached(self, processors: List[Optional[Any]]) -> bool:
+        """
+        Efficiently check for pipeline-aware preprocessors using caching.
+
+        Only performs expensive isinstance checks when processor list actually changes.
+        Pipeline-aware processors (feedback, temporal, etc.) need synchronous processing
+        to avoid temporal artifacts and ensure access to previous pipeline outputs.
+
+        Args:
+            processors: List of processor instances
+
+        Returns:
+            True if any processor requires sync processing, False otherwise
+        """
+        # Create cache key from processor identities
+        cache_key = tuple(id(p) for p in processors)
+
+        # Return cached result if processors haven't changed
+        if cache_key == self._processors_cache_key:
+            return self._has_sync_required_cache
+
+        # Processors changed - recompute and cache
+        self._processors_cache_key = cache_key
+        self._has_sync_required_cache = False
+
+        try:
+            # Check for the mixin or class attribute first
+            for prep in processors:
+                if prep is not None and getattr(prep, 'requires_sync_processing', False):
+                    self._has_sync_required_cache = True
+                    break
+        except Exception:
+            # Fallback: check for specific known pipeline-aware processors
+            try:
+                from .processors.feedback import FeedbackPreprocessor
+                from .processors.color_correction_feedback import ColorCorrectionFeedbackPreprocessor
+                from .processors.feedback_transform import FeedbackTransformPreprocessor
+                for prep in processors:
+                    if isinstance(prep, (FeedbackPreprocessor, ColorCorrectionFeedbackPreprocessor, FeedbackTransformPreprocessor)):
+                        self._has_sync_required_cache = True
+                        break
+            except Exception:
+                # Final fallback on class name check without importing
+                for prep in processors:
+                    if prep is not None:
+                        class_name = prep.__class__.__name__.lower()
+                        if any(name in class_name for name in ['feedback', 'temporal']):
+                            self._has_sync_required_cache = True
+                            break
+
+        return self._has_sync_required_cache
+
     def clear_cache(self) -> None:
         """Clear preprocessing cache"""
-        pass
+        # Clear processor cache when clearing other caches
+        self._processors_cache_key = None
+        self._has_sync_required_cache = False

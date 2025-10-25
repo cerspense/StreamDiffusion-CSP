@@ -17,14 +17,17 @@ class PostprocessingOrchestrator(BaseOrchestrator[torch.Tensor, torch.Tensor]):
     def __init__(self, device: str = "cuda", dtype: torch.dtype = torch.float16, max_workers: int = 4, pipeline_ref: Optional[Any] = None):
         # Postprocessing: 50ms timeout for quality-critical operations like upscaling
         super().__init__(device, dtype, max_workers, timeout_ms=20.0, pipeline_ref=pipeline_ref)
-        
+
         # Postprocessing-specific state
         self._last_input_tensor = None
         self._last_processed_result = None
         self._current_input_tensor = None  # For BaseOrchestrator fallback logic
-        
 
-    
+        # Cache for pipeline-aware processor detection (avoid hot path checks)
+        self._processors_cache_key = None
+        self._has_sync_required_cache = False
+
+
     def process_pipelined(self, 
                         input_tensor: torch.Tensor,
                         postprocessors: List[Any],
@@ -50,15 +53,24 @@ class PostprocessingOrchestrator(BaseOrchestrator[torch.Tensor, torch.Tensor]):
     def _should_use_sync_processing(self, *args, **kwargs) -> bool:
         """
         Determine if synchronous processing should be used instead of pipelined.
-        
-        For postprocessing, we typically don't need sync processing since most
-        postprocessors are stateless and don't have temporal feedback requirements.
-        
+
+        Checks for pipeline-aware postprocessors (feedback, temporal, etc.) that require
+        synchronous processing to avoid temporal artifacts and ensure access to previous
+        pipeline outputs.
+
+        Args:
+            *args: Arguments from process_pipelined call (postprocessors is first argument)
+            **kwargs: Keyword arguments
+
         Returns:
-            False - postprocessing can typically always use pipelined processing
+            True if pipeline-aware postprocessors detected, False otherwise
         """
-        # Future: Could check for specific postprocessor types that need sync processing
-        return False
+        # Extract postprocessors from args - they're the first argument after input_tensor
+        if len(args) < 1:
+            return False
+
+        postprocessors = args[0]  # postprocessors is first arg after input_tensor
+        return self._check_pipeline_aware_cached(postprocessors)
     
     def process_sync(self, 
                    input_tensor: torch.Tensor,
@@ -236,9 +248,64 @@ class PostprocessingOrchestrator(BaseOrchestrator[torch.Tensor, torch.Tensor]):
             logger.error(f"PostprocessingOrchestrator: Postprocessor failed: {e}")
             return input_tensor  # Return original on error
     
+    def _check_pipeline_aware_cached(self, postprocessors: List[Optional[Any]]) -> bool:
+        """
+        Efficiently check for pipeline-aware postprocessors using caching.
+
+        Only performs expensive isinstance checks when postprocessor list actually changes.
+        Pipeline-aware postprocessors (feedback, temporal, etc.) need synchronous processing
+        to avoid temporal artifacts and ensure access to previous pipeline outputs.
+
+        Args:
+            postprocessors: List of postprocessor instances
+
+        Returns:
+            True if any postprocessor requires sync processing, False otherwise
+        """
+        # Create cache key from postprocessor identities
+        cache_key = tuple(id(p) for p in postprocessors)
+
+        # Return cached result if postprocessors haven't changed
+        if cache_key == self._processors_cache_key:
+            return self._has_sync_required_cache
+
+        # Postprocessors changed - recompute and cache
+        self._processors_cache_key = cache_key
+        self._has_sync_required_cache = False
+
+        try:
+            # Check for the mixin or class attribute first
+            for prep in postprocessors:
+                if prep is not None and getattr(prep, 'requires_sync_processing', False):
+                    self._has_sync_required_cache = True
+                    break
+        except Exception:
+            # Fallback: check for specific known pipeline-aware postprocessors
+            try:
+                from .processors.feedback import FeedbackPreprocessor
+                from .processors.color_correction_feedback import ColorCorrectionFeedbackPreprocessor
+                from .processors.feedback_transform import FeedbackTransformPreprocessor
+                for prep in postprocessors:
+                    if isinstance(prep, (FeedbackPreprocessor, ColorCorrectionFeedbackPreprocessor, FeedbackTransformPreprocessor)):
+                        self._has_sync_required_cache = True
+                        break
+            except Exception:
+                # Final fallback on class name check without importing
+                for prep in postprocessors:
+                    if prep is not None:
+                        class_name = prep.__class__.__name__.lower()
+                        if any(name in class_name for name in ['feedback', 'temporal']):
+                            self._has_sync_required_cache = True
+                            break
+
+        return self._has_sync_required_cache
+
     def clear_cache(self) -> None:
         """Clear postprocessing cache"""
         self._last_input_tensor = None
         self._last_processed_result = None
-    
+        # Clear processor cache when clearing other caches
+        self._processors_cache_key = None
+        self._has_sync_required_cache = False
+
 

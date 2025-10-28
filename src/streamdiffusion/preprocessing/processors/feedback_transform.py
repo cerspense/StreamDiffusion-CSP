@@ -377,8 +377,20 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             prev_output_tensor = prev_output_tensor[0]  # Remove batch dimension
 
         # CRITICAL FIX: prev_image_result is ALWAYS from VAE decode (always [-1, 1] range)
-        # We don't need to detect - just convert!
-        prev_output_tensor = (prev_output_tensor / 2.0 + 0.5).clamp(0, 1)
+        # But VAE doesn't actually output the full [-1, 1] range - it has a gray floor
+        # We need to REMAP the actual VAE range to [0, 1] to prevent gray accumulation
+
+        # Get actual min/max from VAE output
+        actual_min = prev_output_tensor.min()
+        actual_max = prev_output_tensor.max()
+
+        # Remap actual range to [0, 1] to force blacks to be black
+        # This prevents gray floor accumulation in the feedback loop
+        if actual_max > actual_min:
+            prev_output_tensor = (prev_output_tensor - actual_min) / (actual_max - actual_min)
+        else:
+            # Fallback if min == max (uniform color)
+            prev_output_tensor = (prev_output_tensor / 2.0 + 0.5).clamp(0, 1)
 
         # STEP 1: Apply color correction to prev_output FIRST
         prev_output_tensor = self._apply_color_correction_tensor(prev_output_tensor)
@@ -474,22 +486,43 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             return tensor.to(device=self.device, dtype=self.dtype)
 
         # CRITICAL FIX: prev_image_result is ALWAYS from VAE decode (always [-1, 1] range)
-        # We don't need to detect - just convert!
-        prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
+        # But VAE doesn't actually output the full [-1, 1] range - it has a gray floor
+        # We need to REMAP the actual VAE range to [0, 1] to prevent gray accumulation
+        print(f"[FEEDBACK DEBUG] prev_output BEFORE conversion: min={prev_output.min().item():.4f}, max={prev_output.max().item():.4f}")
+
+        # Get actual min/max from VAE output
+        actual_min = prev_output.min()
+        actual_max = prev_output.max()
+
+        # Remap actual range to [0, 1] to force blacks to be black
+        # This prevents gray floor accumulation in the feedback loop
+        if actual_max > actual_min:
+            prev_output = (prev_output - actual_min) / (actual_max - actual_min)
+        else:
+            # Fallback if min == max (uniform color)
+            prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
+
+        print(f"[FEEDBACK DEBUG] prev_output AFTER remapping: min={prev_output.min().item():.4f}, max={prev_output.max().item():.4f}")
 
         # STEP 1: Apply color correction to prev_output FIRST
         prev_output = self._apply_color_correction_tensor(prev_output)
+        print(f"[FEEDBACK DEBUG] prev_output AFTER color correction: min={prev_output.min().item():.4f}, max={prev_output.max().item():.4f}")
 
         # Normalize input tensor to [0, 1] if needed
         # Input comes from image_processor.preprocess() which outputs [-1, 1]
         input_tensor = tensor
+        print(f"[FEEDBACK DEBUG] input_tensor BEFORE normalization: min={input_tensor.min().item():.4f}, max={input_tensor.max().item():.4f}")
         if input_tensor.min() < 0.0:
             # [-1, 1] range (from VAE preprocessor) - convert to [0, 1]
             input_tensor = (input_tensor / 2.0 + 0.5).clamp(0, 1)
+            print(f"[FEEDBACK DEBUG] input_tensor converted from [-1,1] to [0,1]")
         elif input_tensor.max() > 1.0:
             # [0, 255] range
             input_tensor = input_tensor / 255.0
-        # else: already in [0, 1]
+            print(f"[FEEDBACK DEBUG] input_tensor converted from [0,255] to [0,1]")
+        else:
+            print(f"[FEEDBACK DEBUG] input_tensor already in [0,1] range")
+        print(f"[FEEDBACK DEBUG] input_tensor AFTER normalization: min={input_tensor.min().item():.4f}, max={input_tensor.max().item():.4f}")
 
         # Ensure both tensors have same format for blending
         if prev_output.dim() == 4 and prev_output.shape[0] == 1:

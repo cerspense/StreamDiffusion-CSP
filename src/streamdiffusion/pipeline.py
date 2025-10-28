@@ -925,14 +925,17 @@ class StreamDiffusion:
         if self.frame_capturer and self.frame_capturer.should_capture():
             self.frame_capturer.capture_stage("after_vae_decode", x_output, stage_order=5)
 
+        # CRITICAL: Store prev_image_result BEFORE post-processing to avoid feedback oscillation
+        # Post-processing effects (like aggressive color correction) should not participate
+        # in the feedback loop, otherwise they create ping-pong oscillation
+        self.prev_image_result = x_output
+
         # IMAGE POSTPROCESSING HOOKS: After VAE decoding, before final output
         x_output = self._apply_image_postprocessing_hooks(x_output)
 
         # FRAME CAPTURE: After image postprocessing
         if self.frame_capturer and self.frame_capturer.should_capture():
             self.frame_capturer.capture_stage("after_img_postprocess", x_output, stage_order=6)
-
-        self.prev_image_result = x_output
         end.record()
         torch.cuda.synchronize()
         inference_time = start.elapsed_time(end) / 1000

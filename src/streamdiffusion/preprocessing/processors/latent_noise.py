@@ -22,9 +22,9 @@ class LatentNoisePreprocessor(BasePreprocessor):
                 "noise_strength": {
                     "type": "float",
                     "default": 0.0,
-                    "range": [0.0, 2.0],
-                    "step": 0.01,
-                    "description": "Noise injection strength (0 = off, 0.1 = subtle, 0.5 = moderate, 2.0 = extreme)"
+                    "range": [0.0, 10.0],
+                    "step": 0.1,
+                    "description": "Noise injection strength (0 = off, 0.5 = subtle, 2.0 = moderate, 5.0 = heavy, 10.0 = extreme)"
                 },
                 "noise_mode": {
                     "type": "string",

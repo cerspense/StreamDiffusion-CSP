@@ -4690,10 +4690,12 @@ engine_dir: "./engines/td"
                                self.ownerComp.par.Usepreprocesscolor.eval())
         use_preprocess_sharpen_noise = (hasattr(self.ownerComp.par, 'Usepreprocesssharpennoise') and
                                        self.ownerComp.par.Usepreprocesssharpennoise.eval())
+        use_preprocess_sharpen = (hasattr(self.ownerComp.par, 'Usepreprocesssharpen') and
+                                 self.ownerComp.par.Usepreprocesssharpen.eval())
         use_feedback_transform = (hasattr(self.ownerComp.par, 'Usefeedbacktransform') and
                                  self.ownerComp.par.Usefeedbacktransform.eval())
 
-        if use_image_feedback or use_color_correction_feedback or use_preprocess_color or use_preprocess_sharpen_noise or use_feedback_transform:
+        if use_image_feedback or use_color_correction_feedback or use_preprocess_color or use_preprocess_sharpen_noise or use_preprocess_sharpen or use_feedback_transform:
             yaml_content += """# Multi-stage Image Preprocessing (Pre-Fx)
 image_preprocessing:
   enabled: true
@@ -4749,6 +4751,18 @@ image_preprocessing:
                     yaml_content += f'        {param_name}: {param_value}\n'
                 processor_order += 1
 
+            if use_preprocess_sharpen:
+                params = self.gather_fx_parameters_for_processor('preprocess_sharpen')
+                yaml_content += f'    - type: "preprocess_sharpen"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                # CRITICAL: Force sync processing to avoid 1-frame delay from pipelined orchestrator
+                yaml_content += f'        requires_sync_processing: true\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
+                processor_order += 1
+
             if use_feedback_transform:
                 params = self.gather_fx_parameters_for_processor('feedback_transform')
                 yaml_content += f'    - type: "feedback_transform"\n'
@@ -4768,13 +4782,15 @@ image_preprocessing:
         yaml_content += "\n"
 
         # Add Latent Preprocessing (Multi-stage preprocessing)
-        # Fx processors: latent_feedback and latent_transform
+        # Fx processors: latent_feedback, latent_transform, and latent_noise
         use_latent_feedback = (hasattr(self.ownerComp.par, 'Uselatentfeedback') and
                                self.ownerComp.par.Uselatentfeedback.eval())
         use_latent_transform = (hasattr(self.ownerComp.par, 'Uselatenttransform') and
                                 self.ownerComp.par.Uselatenttransform.eval())
+        use_latent_noise = (hasattr(self.ownerComp.par, 'Uselatentnoise') and
+                           self.ownerComp.par.Uselatentnoise.eval())
 
-        if use_latent_feedback or use_latent_transform:
+        if use_latent_feedback or use_latent_transform or use_latent_noise:
             yaml_content += """# Multi-stage Latent Preprocessing (Fx)
 latent_preprocessing:
   enabled: true
@@ -4795,6 +4811,16 @@ latent_preprocessing:
             if use_latent_transform:
                 params = self.gather_fx_parameters_for_processor('latent_transform')
                 yaml_content += f'    - type: "latent_transform"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
+                processor_order += 1
+
+            if use_latent_noise:
+                params = self.gather_fx_parameters_for_processor('latent_noise')
+                yaml_content += f'    - type: "latent_noise"\n'
                 yaml_content += f'      order: {processor_order}\n'
                 yaml_content += f'      enabled: true\n'
                 yaml_content += f'      params:\n'
@@ -6627,6 +6653,10 @@ td_settings:
             active_fx.append('preprocess_color')
         if hasattr(self.ownerComp.par, 'Usepreprocesssharpennoise') and self.ownerComp.par.Usepreprocesssharpennoise.eval():
             active_fx.append('preprocess_sharpen_noise')
+        if hasattr(self.ownerComp.par, 'Usepreprocesssharpen') and self.ownerComp.par.Usepreprocesssharpen.eval():
+            active_fx.append('preprocess_sharpen')
+        if hasattr(self.ownerComp.par, 'Uselatentnoise') and self.ownerComp.par.Uselatentnoise.eval():
+            active_fx.append('latent_noise')
         if hasattr(self.ownerComp.par, 'Usefeedbacktransform') and self.ownerComp.par.Usefeedbacktransform.eval():
             active_fx.append('feedback_transform')
 

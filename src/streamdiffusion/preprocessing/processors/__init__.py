@@ -14,14 +14,10 @@ from .faceid_embedding import FaceIDEmbeddingPreprocessor
 from .feedback import FeedbackPreprocessor
 from .feedback_transform import FeedbackTransformPreprocessor
 from .latent_feedback import LatentFeedbackPreprocessor
-from .latent_transform import LatentTransformPreprocessor
-from .latent_transform_cc import LatentTransformCCPreprocessor
 from .sharpen import SharpenPreprocessor
 from .upscale import UpscalePreprocessor
 from .blur import BlurPreprocessor
 from .realesrgan_trt import RealESRGANProcessor
-from .color_correction_feedback import ColorCorrectionFeedbackPreprocessor
-from .post_process_xform_cc import PostProcessTransformCCPreprocessor
 from .post_process_color import PostProcessColorPreprocessor
 from .post_process_sharpen_noise import PostProcessSharpenNoisePreprocessor
 from .preprocess_color import PreprocessColorPreprocessor
@@ -77,14 +73,10 @@ _preprocessor_registry = {
     "feedback": FeedbackPreprocessor,
     "feedback_transform": FeedbackTransformPreprocessor,
     "latent_feedback": LatentFeedbackPreprocessor,
-    "latent_transform": LatentTransformPreprocessor,
-    "latent_transform_cc": LatentTransformCCPreprocessor,
     "sharpen": SharpenPreprocessor,
     "upscale": UpscalePreprocessor,
     "blur": BlurPreprocessor,
     "realesrgan_trt": RealESRGANProcessor,
-    "color_correction_feedback": ColorCorrectionFeedbackPreprocessor,
-    "post_process_xform_cc": PostProcessTransformCCPreprocessor,
     "post_process_color": PostProcessColorPreprocessor,
     "post_process_sharpen_noise": PostProcessSharpenNoisePreprocessor,
     "preprocess_color": PreprocessColorPreprocessor,
@@ -187,10 +179,6 @@ __all__ = [
     "FeedbackPreprocessor",
     "FeedbackTransformPreprocessor",
     "LatentFeedbackPreprocessor",
-    "LatentTransformPreprocessor",
-    "LatentTransformCCPreprocessor",
-    "ColorCorrectionFeedbackPreprocessor",
-    "PostProcessTransformCCPreprocessor",
     "PostProcessColorPreprocessor",
     "PostProcessSharpenNoisePreprocessor",
     "PreprocessColorPreprocessor",

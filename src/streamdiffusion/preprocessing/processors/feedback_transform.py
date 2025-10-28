@@ -80,9 +80,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                 "black_level": {
                     "type": "float",
                     "default": 0.0,
-                    "range": [0.0, 0.3],
-                    "step": 0.001,
-                    "description": "Black level lift applied to feedback (raises minimum luminance)"
+                    "range": [0.0, 1.0],
+                    "step": 0.01,
+                    "description": "Black crush threshold (0.0 = no crush, 0.5 = values below 0.5 become black, 1.0 = all black)"
                 },
                 "gamma": {
                     "type": "float",
@@ -296,10 +296,14 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
 
         result = tensor.clone()
 
-        # 1. Black Level (lift shadows) - applied first to establish new floor
+        # 1. Black Level (CRUSH blacks, not lift) - applied first
         if abs(self.black_level) > 1e-6:
-            # Compress range: [0, 1] -> [black_level, 1]
-            result = result * (1.0 - self.black_level) + self.black_level
+            # Black crush: values below black_level threshold become pure black
+            # black_level=0.0 → no crush (normal)
+            # black_level=0.5 → anything below 0.5 becomes black
+            # black_level=1.0 → everything becomes black
+            # Remap: [black_level, 1] → [0, 1], values below threshold → 0
+            result = torch.clamp((result - self.black_level) / (1.0 - self.black_level + 1e-8), 0, 1)
 
         # 2. Brightness (additive) - shift all values
         if abs(self.brightness) > 1e-6:

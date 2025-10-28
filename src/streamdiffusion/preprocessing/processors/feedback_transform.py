@@ -376,14 +376,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         if prev_output_tensor.dim() == 4:
             prev_output_tensor = prev_output_tensor[0]  # Remove batch dimension
 
-        # CRITICAL FIX: Detect range and convert to [0, 1] (image processing range)
-        if prev_output_tensor.min() < 0.0:
-            # [-1, 1] range (VAE output) - CRITICAL FIX FOR 50% GRAY FLOOR!
-            prev_output_tensor = (prev_output_tensor / 2.0 + 0.5).clamp(0, 1)
-        elif prev_output_tensor.max() > 1.0:
-            # [0, 255] range
-            prev_output_tensor = prev_output_tensor / 255.0
-        # else: already in [0, 1] range
+        # CRITICAL FIX: prev_image_result is ALWAYS from VAE decode (always [-1, 1] range)
+        # We don't need to detect - just convert!
+        prev_output_tensor = (prev_output_tensor / 2.0 + 0.5).clamp(0, 1)
 
         # STEP 1: Apply color correction to prev_output FIRST
         prev_output_tensor = self._apply_color_correction_tensor(prev_output_tensor)
@@ -468,14 +463,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                 tensor = tensor.unsqueeze(0)
             return tensor.to(device=self.device, dtype=self.dtype)
 
-        # CRITICAL FIX: Detect range and convert to [0, 1] (image processing range)
-        if prev_output.min() < 0.0:
-            # [-1, 1] range (VAE output) - CRITICAL FIX FOR 50% GRAY FLOOR!
-            prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
-        elif prev_output.max() > 1.0:
-            # [0, 255] range
-            prev_output = prev_output / 255.0
-        # else: already in [0, 1] range
+        # CRITICAL FIX: prev_image_result is ALWAYS from VAE decode (always [-1, 1] range)
+        # We don't need to detect - just convert!
+        prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
 
         # STEP 1: Apply color correction to prev_output FIRST
         prev_output = self._apply_color_correction_tensor(prev_output)

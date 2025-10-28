@@ -58,10 +58,10 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                 },
                 "brightness": {
                     "type": "float",
-                    "default": 0.0,
+                    "default": -0.1,
                     "range": [-1.0, 1.0],
                     "step": 0.01,
-                    "description": "Brightness adjustment applied to feedback (-1.0 = black, 0.0 = neutral, 1.0 = white)"
+                    "description": "Brightness adjustment applied to feedback (-0.1 default counteracts VAE gray bias)"
                 },
                 "saturation": {
                     "type": "float",
@@ -145,7 +145,7 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                  pipeline_ref: Any,
                  image_resolution: int = 512,
                  feedback_strength: float = 0.8,
-                 brightness: float = 0.0,
+                 brightness: float = -0.1,
                  saturation: float = 1.0,
                  contrast: float = 1.0,
                  black_level: float = 0.0,

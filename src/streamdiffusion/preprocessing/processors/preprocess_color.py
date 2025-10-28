@@ -2,16 +2,15 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from typing import Union, Optional, Any
-from .base import PipelineAwareProcessor
+from .base import BasePreprocessor
 
 
-class PreprocessColorPreprocessor(PipelineAwareProcessor):
+class PreprocessColorPreprocessor(BasePreprocessor):
     """
-    Image preprocessing color correction with optional feedback and noise injection
+    Simple image preprocessing color correction (Stage 1 - before VAE encode)
 
-    Applies color grading in Stage 1 (before VAE encode) so color-corrected
-    output participates in the image feedback loop. Works with prev_image_result
-    from previous frame's final output.
+    Applies color grading to the input image BEFORE it goes into the VAE encoder.
+    This is a stateless processor designed to work with feedback_transform.
 
     Key Features:
     - Brightness: Adjust overall luminance (-1.0 to 1.0)
@@ -20,46 +19,27 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
     - Black Level: Lift shadows/adjust minimum luminance (0.0 to 0.3)
     - Gamma: Power curve adjustment (0.5 = brighter mids, 2.0 = darker mids)
     - Temperature: Color temperature shift (-1.0 = cooler/blue, 1.0 = warmer/orange)
-    - Feedback: Temporal smoothing with previous output (0.0 = off, 1.0 = full)
-    - Noise: Random noise injection for variety (0.0 = off, 0.1 = max)
 
     Processing Pipeline:
-    1. Get current input image
-    2. Get previous output image (if feedback enabled)
-    3. Apply color correction to current input
-    4. Apply color correction to previous output (if available)
-    5. Blend based on feedback_strength (linear blend)
-    6. Inject noise if noise_strength > 0
-    7. Pass to VAE encode → diffusion
+    1. Take input image (after feedback_transform if enabled)
+    2. Apply color correction operations in sequence
+    3. Clamp to [0, 1] to prevent drift
+    4. Pass to VAE encode
 
-    This processor operates in IMAGE PREPROCESSING (Stage 1), so it:
-    - ✅ Color-corrected output stored in prev_image_result
-    - ✅ Participates in image feedback loop
-    - ✅ Can combine with other Stage 1 processors
-    - ❌ Doesn't influence latent_transform (separate feedback path)
-
-    Use Cases:
-    - Stateless color grading before diffusion (feedback_strength=0.0)
-    - Temporal color consistency with feedback (feedback_strength>0.0)
-    - Combine with feedback_transform for color-aware motion
-    - Apply color correction that feeds into VAE encoder
+    This processor is stateless and operates in Stage 1 (image preprocessing).
+    Color corrections will participate in the feedback loop via prev_image_result.
 
     Examples:
-    - brightness=0.1, saturation=1.2, feedback_strength=0.0: Stateless color grading
-    - brightness=0.1, saturation=1.2, feedback_strength=0.3: Color + temporal smoothing
-    - Pair with feedback_transform for color-aware zoom/pan/rotate!
-
-    CRITICAL: Uses requires_sync_processing=True to avoid 1-frame delay!
+    - brightness=-0.2, saturation=1.2: Darker, more saturated input
+    - black_level=0.05, contrast=1.1: Lifted shadows with more punch
+    - gamma=0.8, temperature=0.2: Brighter mids with warm tone
     """
-
-    # CRITICAL: Force synchronous processing to avoid 1-frame delay
-    requires_sync_processing = True
 
     @classmethod
     def get_preprocessor_metadata(cls):
         return {
-            "display_name": "Preprocess Color Correction (Stage 1 Feedback)",
-            "description": "Color grading before VAE encode - participates in image feedback loop",
+            "display_name": "Preprocess Color Correction",
+            "description": "Color grading before VAE encode (participates in feedback loop)",
             "parameters": {
                 "brightness": {
                     "type": "float",
@@ -102,32 +82,17 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
                     "range": [-1.0, 1.0],
                     "step": 0.01,
                     "description": "Color temperature (-1.0 = cooler/blue, 0.0 = neutral, 1.0 = warmer/orange)"
-                },
-                "feedback_strength": {
-                    "type": "float",
-                    "default": 0.0,
-                    "range": [0.0, 1.0],
-                    "step": 0.01,
-                    "description": "Temporal feedback strength (0.0 = stateless, 1.0 = full smoothing)"
-                },
-                "noise_strength": {
-                    "type": "float",
-                    "default": 0.0,
-                    "range": [0.0, 0.1],
-                    "step": 0.001,
-                    "description": "Random noise injection strength (0.0 = off, 0.01 = subtle, 0.1 = strong)"
                 }
             },
             "use_cases": [
-                "Color grading before VAE encode (participates in feedback)",
-                "Temporal color consistency with feedback",
-                "Combine with feedback_transform for color-aware motion",
-                "Stateless color correction (feedback_strength=0.0)"
+                "Color grading before VAE encode",
+                "Works with feedback_transform to prevent brightness drift",
+                "Stateless color correction in Stage 1",
+                "Participates in feedback loop"
             ]
         }
 
     def __init__(self,
-                 pipeline_ref: Any,
                  image_resolution: int = 512,
                  brightness: float = 0.0,
                  saturation: float = 1.0,
@@ -135,14 +100,11 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
                  black_level: float = 0.0,
                  gamma: float = 1.0,
                  temperature: float = 0.0,
-                 feedback_strength: float = 0.0,
-                 noise_strength: float = 0.0,
                  **kwargs):
         """
-        Initialize preprocessing color correction with optional feedback
+        Initialize preprocess color correction
 
         Args:
-            pipeline_ref: Reference to pipeline for accessing previous output
             image_resolution: Output image resolution
             brightness: Brightness adjustment (-1.0 to 1.0)
             saturation: Saturation multiplier (0.0 to 2.0)
@@ -150,12 +112,9 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
             black_level: Black level lift (0.0 to 0.3)
             gamma: Gamma correction (0.5 to 2.0)
             temperature: Color temperature (-1.0 to 1.0)
-            feedback_strength: Temporal feedback (0.0 = off, 1.0 = full)
-            noise_strength: Random noise injection (0.0 = off, 0.1 = max)
-            **kwargs: Additional parameters passed to PipelineAwareProcessor
+            **kwargs: Additional parameters passed to BasePreprocessor
         """
         super().__init__(
-            pipeline_ref=pipeline_ref,
             image_resolution=image_resolution,
             brightness=brightness,
             saturation=saturation,
@@ -163,8 +122,6 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
             black_level=black_level,
             gamma=gamma,
             temperature=temperature,
-            feedback_strength=feedback_strength,
-            noise_strength=noise_strength,
             **kwargs
         )
         self.brightness = brightness
@@ -173,17 +130,6 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
         self.black_level = black_level
         self.gamma = gamma
         self.temperature = temperature
-        self.feedback_strength = feedback_strength
-        self.noise_strength = noise_strength
-        self._first_frame = True
-
-    def _get_previous_data(self):
-        """Get previous frame output from pipeline (if available)"""
-        if self.pipeline_ref is not None:
-            if hasattr(self.pipeline_ref, 'prev_image_result'):
-                if self.pipeline_ref.prev_image_result is not None and not self._first_frame:
-                    return self.pipeline_ref.prev_image_result
-        return None
 
     def _apply_color_correction_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -262,65 +208,22 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
 
     def _process_core(self, image: Image.Image) -> Image.Image:
         """
-        Process PIL image with color correction + optional feedback
+        Process PIL image with color correction
 
         Args:
             image: Input PIL image
 
         Returns:
-            Color-corrected PIL image (optionally blended with previous output)
+            Color-corrected PIL image
         """
         # Convert to tensor
         tensor = self.pil_to_tensor(image).squeeze(0)  # [C, H, W]
 
-        # Apply color correction to current input
-        corrected_input = self._apply_color_correction_tensor(tensor)
+        # Apply color correction
+        corrected = self._apply_color_correction_tensor(tensor)
 
-        # Get previous output (if available)
-        prev_output = self._get_previous_data()
-
-        if prev_output is None or abs(self.feedback_strength) < 1e-6:
-            # No feedback - just return corrected input (with optional noise)
-            result = corrected_input
-
-            # Inject noise if enabled
-            if abs(self.noise_strength) > 1e-6:
-                noise = torch.randn_like(result, device=result.device, dtype=result.dtype)
-                result = result + self.noise_strength * noise
-                # Re-clamp after noise injection
-                result = result.clamp(0, 1)
-
-            self._first_frame = False
-            return self.tensor_to_pil(result.squeeze(0))
-
-        # CRITICAL: Convert VAE output range from [-1, 1] to [0, 1]
-        prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
-
-        # Handle batch size mismatch
-        if prev_output.shape[0] != corrected_input.shape[0]:
-            if prev_output.shape[0] < corrected_input.shape[0]:
-                prev_output = prev_output.repeat(corrected_input.shape[0], 1, 1, 1)
-            else:
-                prev_output = prev_output[:corrected_input.shape[0]]
-
-        # Apply color correction to previous output as well
-        corrected_prev = self._apply_color_correction_tensor(prev_output)
-
-        # Blend: (1 - feedback_strength) * corrected_input + feedback_strength * corrected_prev
-        blended = (1.0 - self.feedback_strength) * corrected_input + self.feedback_strength * corrected_prev
-
-        # CRITICAL: Clamp to prevent color drift
-        blended = blended.clamp(0, 1)
-
-        # Inject noise if enabled (after feedback blend)
-        if abs(self.noise_strength) > 1e-6:
-            noise = torch.randn_like(blended, device=blended.device, dtype=blended.dtype)
-            blended = blended + self.noise_strength * noise
-            # Re-clamp after noise injection
-            blended = blended.clamp(0, 1)
-
-        self._first_frame = False
-        return self.tensor_to_pil(blended.squeeze(0))
+        # Convert back to PIL
+        return self.tensor_to_pil(corrected)
 
     def _process_tensor_core(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -332,63 +235,19 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
         Returns:
             Color-corrected tensor [B, C, H, W] in range [0, 1]
         """
-        # Normalize input to [0, 1] if needed
+        # Normalize input to [0, 1] based on detected range
         if tensor.max() > 1.0:
+            # [0, 255] range
             tensor = tensor / 255.0
 
         # Ensure batch dimension
         if tensor.dim() == 3:
             tensor = tensor.unsqueeze(0)
 
-        # Apply color correction to current input
-        corrected_input = self._apply_color_correction_tensor(tensor)
-
-        # Get previous output (if available)
-        prev_output = self._get_previous_data()
-
-        if prev_output is None or abs(self.feedback_strength) < 1e-6:
-            # No feedback - just return corrected input (with optional noise)
-            result = corrected_input
-
-            # Inject noise if enabled
-            if abs(self.noise_strength) > 1e-6:
-                noise = torch.randn_like(result, device=result.device, dtype=result.dtype)
-                result = result + self.noise_strength * noise
-                # Re-clamp after noise injection
-                result = result.clamp(0, 1)
-
-            self._first_frame = False
-            result = result.to(device=self.device, dtype=self.dtype)
-            return result
-
-        # CRITICAL: Convert VAE output range from [-1, 1] to [0, 1]
-        prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
-
-        # Handle batch size mismatch
-        if prev_output.shape[0] != corrected_input.shape[0]:
-            if prev_output.shape[0] < corrected_input.shape[0]:
-                prev_output = prev_output.repeat(corrected_input.shape[0], 1, 1, 1)
-            else:
-                prev_output = prev_output[:corrected_input.shape[0]]
-
-        # Apply color correction to previous output as well
-        corrected_prev = self._apply_color_correction_tensor(prev_output)
-
-        # Blend: (1 - feedback_strength) * corrected_input + feedback_strength * corrected_prev
-        blended = (1.0 - self.feedback_strength) * corrected_input + self.feedback_strength * corrected_prev
-
-        # CRITICAL: Clamp to prevent color drift
-        blended = blended.clamp(0, 1)
-
-        # Inject noise if enabled (after feedback blend)
-        if abs(self.noise_strength) > 1e-6:
-            noise = torch.randn_like(blended, device=blended.device, dtype=blended.dtype)
-            blended = blended + self.noise_strength * noise
-            # Re-clamp after noise injection
-            blended = blended.clamp(0, 1)
-
-        self._first_frame = False
+        # Apply color correction
+        result = self._apply_color_correction_tensor(tensor)
 
         # Ensure correct device and dtype
-        result = blended.to(device=self.device, dtype=self.dtype)
+        result = result.to(device=self.device, dtype=self.dtype)
+
         return result

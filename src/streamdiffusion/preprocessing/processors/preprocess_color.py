@@ -7,7 +7,7 @@ from .base import PipelineAwareProcessor
 
 class PreprocessColorPreprocessor(PipelineAwareProcessor):
     """
-    Image preprocessing color correction with optional feedback
+    Image preprocessing color correction with optional feedback and noise injection
 
     Applies color grading in Stage 1 (before VAE encode) so color-corrected
     output participates in the image feedback loop. Works with prev_image_result
@@ -21,14 +21,16 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
     - Gamma: Power curve adjustment (0.5 = brighter mids, 2.0 = darker mids)
     - Temperature: Color temperature shift (-1.0 = cooler/blue, 1.0 = warmer/orange)
     - Feedback: Temporal smoothing with previous output (0.0 = off, 1.0 = full)
+    - Noise: Random noise injection for variety (0.0 = off, 0.1 = max)
 
     Processing Pipeline:
     1. Get current input image
     2. Get previous output image (if feedback enabled)
     3. Apply color correction to current input
     4. Apply color correction to previous output (if available)
-    5. Blend based on feedback_strength
-    6. Pass to VAE encode → diffusion
+    5. Blend based on feedback_strength (linear blend)
+    6. Inject noise if noise_strength > 0
+    7. Pass to VAE encode → diffusion
 
     This processor operates in IMAGE PREPROCESSING (Stage 1), so it:
     - ✅ Color-corrected output stored in prev_image_result
@@ -107,6 +109,13 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
                     "range": [0.0, 1.0],
                     "step": 0.01,
                     "description": "Temporal feedback strength (0.0 = stateless, 1.0 = full smoothing)"
+                },
+                "noise_strength": {
+                    "type": "float",
+                    "default": 0.0,
+                    "range": [0.0, 0.1],
+                    "step": 0.001,
+                    "description": "Random noise injection strength (0.0 = off, 0.01 = subtle, 0.1 = strong)"
                 }
             },
             "use_cases": [
@@ -127,6 +136,7 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
                  gamma: float = 1.0,
                  temperature: float = 0.0,
                  feedback_strength: float = 0.0,
+                 noise_strength: float = 0.0,
                  **kwargs):
         """
         Initialize preprocessing color correction with optional feedback
@@ -141,6 +151,7 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
             gamma: Gamma correction (0.5 to 2.0)
             temperature: Color temperature (-1.0 to 1.0)
             feedback_strength: Temporal feedback (0.0 = off, 1.0 = full)
+            noise_strength: Random noise injection (0.0 = off, 0.1 = max)
             **kwargs: Additional parameters passed to PipelineAwareProcessor
         """
         super().__init__(
@@ -153,6 +164,7 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
             gamma=gamma,
             temperature=temperature,
             feedback_strength=feedback_strength,
+            noise_strength=noise_strength,
             **kwargs
         )
         self.brightness = brightness
@@ -162,6 +174,7 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
         self.gamma = gamma
         self.temperature = temperature
         self.feedback_strength = feedback_strength
+        self.noise_strength = noise_strength
         self._first_frame = True
 
     def _get_previous_data(self):
@@ -267,9 +280,18 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
         prev_output = self._get_previous_data()
 
         if prev_output is None or abs(self.feedback_strength) < 1e-6:
-            # No feedback - just return corrected input
+            # No feedback - just return corrected input (with optional noise)
+            result = corrected_input
+
+            # Inject noise if enabled
+            if abs(self.noise_strength) > 1e-6:
+                noise = torch.randn_like(result, device=result.device, dtype=result.dtype)
+                result = result + self.noise_strength * noise
+                # Re-clamp after noise injection
+                result = result.clamp(0, 1)
+
             self._first_frame = False
-            return self.tensor_to_pil(corrected_input)
+            return self.tensor_to_pil(result.squeeze(0))
 
         # CRITICAL: Convert VAE output range from [-1, 1] to [0, 1]
         prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
@@ -289,6 +311,13 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
 
         # CRITICAL: Clamp to prevent color drift
         blended = blended.clamp(0, 1)
+
+        # Inject noise if enabled (after feedback blend)
+        if abs(self.noise_strength) > 1e-6:
+            noise = torch.randn_like(blended, device=blended.device, dtype=blended.dtype)
+            blended = blended + self.noise_strength * noise
+            # Re-clamp after noise injection
+            blended = blended.clamp(0, 1)
 
         self._first_frame = False
         return self.tensor_to_pil(blended.squeeze(0))
@@ -318,9 +347,18 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
         prev_output = self._get_previous_data()
 
         if prev_output is None or abs(self.feedback_strength) < 1e-6:
-            # No feedback - just return corrected input
+            # No feedback - just return corrected input (with optional noise)
+            result = corrected_input
+
+            # Inject noise if enabled
+            if abs(self.noise_strength) > 1e-6:
+                noise = torch.randn_like(result, device=result.device, dtype=result.dtype)
+                result = result + self.noise_strength * noise
+                # Re-clamp after noise injection
+                result = result.clamp(0, 1)
+
             self._first_frame = False
-            result = corrected_input.to(device=self.device, dtype=self.dtype)
+            result = result.to(device=self.device, dtype=self.dtype)
             return result
 
         # CRITICAL: Convert VAE output range from [-1, 1] to [0, 1]
@@ -341,6 +379,13 @@ class PreprocessColorPreprocessor(PipelineAwareProcessor):
 
         # CRITICAL: Clamp to prevent color drift
         blended = blended.clamp(0, 1)
+
+        # Inject noise if enabled (after feedback blend)
+        if abs(self.noise_strength) > 1e-6:
+            noise = torch.randn_like(blended, device=blended.device, dtype=blended.dtype)
+            blended = blended + self.noise_strength * noise
+            # Re-clamp after noise injection
+            blended = blended.clamp(0, 1)
 
         self._first_frame = False
 

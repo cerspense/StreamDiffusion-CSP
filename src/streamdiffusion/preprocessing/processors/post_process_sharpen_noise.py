@@ -121,34 +121,24 @@ class PostProcessSharpenNoisePreprocessor(BasePreprocessor):
             kernel_size += 1
         kernel_size = max(3, kernel_size)  # Minimum size 3
 
-        # Create Gaussian kernel
+        # Create 1D Gaussian kernel
         sigma = radius
         x = torch.arange(kernel_size, dtype=self.dtype, device=self.device) - kernel_size // 2
-        gauss = torch.exp(-x.pow(2) / (2 * sigma ** 2))
-        gauss = gauss / gauss.sum()
+        gauss_1d = torch.exp(-x.pow(2) / (2 * sigma ** 2))
+        gauss_1d = gauss_1d / gauss_1d.sum()
 
-        # Create 2D kernel (separable Gaussian)
-        kernel_1d = gauss.view(1, 1, -1)
+        # Create 2D Gaussian kernel from outer product of 1D kernels
+        gauss_2d = gauss_1d.unsqueeze(0) * gauss_1d.unsqueeze(1)  # [kernel_size, kernel_size]
+        gauss_2d = gauss_2d / gauss_2d.sum()  # Normalize
 
-        # Apply separable convolution (horizontal then vertical)
-        padding = kernel_size // 2
+        # Expand kernel to match input channels: [out_channels, in_channels/groups, kH, kW]
+        # For depthwise convolution: groups=C, so kernel is [C, 1, kH, kW]
         B, C, H, W = tensor.shape
+        kernel = gauss_2d.unsqueeze(0).unsqueeze(0).expand(C, 1, kernel_size, kernel_size)
 
-        # Horizontal blur
-        tensor_padded = F.pad(tensor, (padding, padding, 0, 0), mode='reflect')
-        blurred_h = F.conv1d(
-            tensor_padded.reshape(B * C, 1, H, W + 2 * padding).transpose(2, 3).reshape(B * C * (W + 2 * padding), 1, H),
-            kernel_1d,
-            padding=0
-        ).reshape(B * C, W + 2 * padding, 1, H).transpose(2, 3).reshape(B, C, H, W + 2 * padding)
-
-        # Vertical blur
-        blurred_padded = F.pad(blurred_h, (0, 0, padding, padding), mode='reflect')
-        blurred = F.conv1d(
-            blurred_padded.reshape(B * C, 1, H + 2 * padding, W).transpose(2, 3).reshape(B * C * W, 1, H + 2 * padding),
-            kernel_1d,
-            padding=0
-        ).reshape(B * C, W, 1, H + 2 * padding).transpose(2, 3).reshape(B, C, H + 2 * padding, W)[:, :, padding:-padding, :]
+        # Apply depthwise convolution (each channel blurred independently)
+        padding = kernel_size // 2
+        blurred = F.conv2d(tensor, kernel, padding=padding, groups=C)
 
         return blurred
 

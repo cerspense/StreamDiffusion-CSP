@@ -232,14 +232,18 @@ class PostProcessColorPreprocessor(BasePreprocessor):
         GPU-optimized path for tensor processing
 
         Args:
-            tensor: Input tensor [B, C, H, W] or [C, H, W] in range [0, 1] or [0, 255]
+            tensor: Input tensor [B, C, H, W] or [C, H, W] in range [-1, 1] (VAE output), [0, 1], or [0, 255]
 
         Returns:
             Color-corrected tensor [B, C, H, W] in range [0, 1]
         """
-        # Normalize input to [0, 1] if needed
+        # Normalize input to [0, 1] based on detected range
         if tensor.max() > 1.0:
+            # [0, 255] range
             tensor = tensor / 255.0
+        elif tensor.min() < 0.0:
+            # [-1, 1] range (VAE output) - CRITICAL FIX FOR 50% GRAY FLOOR!
+            tensor = (tensor / 2.0 + 0.5).clamp(0, 1)
 
         # Ensure batch dimension
         if tensor.dim() == 3:

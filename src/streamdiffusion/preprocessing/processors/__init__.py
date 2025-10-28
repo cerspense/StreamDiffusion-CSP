@@ -20,6 +20,8 @@ from .realesrgan_trt import RealESRGANProcessor
 from .post_process_color import PostProcessColorPreprocessor
 from .post_process_sharpen_noise import PostProcessSharpenNoisePreprocessor
 from .preprocess_sharpen_noise import PreprocessSharpenNoisePreprocessor
+from .preprocess_sharpen import PreprocessSharpenPreprocessor
+from .latent_noise import LatentNoisePreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
 try:
@@ -77,6 +79,8 @@ _preprocessor_registry = {
     "post_process_color": PostProcessColorPreprocessor,
     "post_process_sharpen_noise": PostProcessSharpenNoisePreprocessor,
     "preprocess_sharpen_noise": PreprocessSharpenNoisePreprocessor,
+    "preprocess_sharpen": PreprocessSharpenPreprocessor,
+    "latent_noise": LatentNoisePreprocessor,
 }
 
 # Add TensorRT preprocessors if available
@@ -177,6 +181,8 @@ __all__ = [
     "PostProcessColorPreprocessor",
     "PostProcessSharpenNoisePreprocessor",
     "PreprocessSharpenNoisePreprocessor",
+    "PreprocessSharpenPreprocessor",
+    "LatentNoisePreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",
     "register_preprocessor",

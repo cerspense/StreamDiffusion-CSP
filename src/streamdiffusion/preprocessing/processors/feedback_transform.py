@@ -7,32 +7,35 @@ from .base import PipelineAwareProcessor
 
 class FeedbackTransformPreprocessor(PipelineAwareProcessor):
     """
-    Image-space feedback preprocessor with geometric transformations
+    Image-space feedback preprocessor with color correction and geometric transformations
 
-    Combines feedback loop with geometric transforms (zoom, pan, rotate). Operates in image
-    space BEFORE VAE encoding, providing Deforum-style motion with temporal consistency.
+    Combines color grading with geometric transforms and feedback loop. Operates in image
+    space BEFORE VAE encoding, replicating traditional external feedback workflows.
 
     Key Features:
-    - Feedback Loop: Blend input with previous output image
-    - Zoom: Scale previous output (interpolate + crop/pad)
-    - Pan: Translate previous output in X/Y
-    - Rotate: Rotate previous output around center
+    - Color Correction: Brightness, saturation, contrast, gamma, black level, temperature
+    - Geometric Transforms: Zoom, pan, rotate on previous output
+    - Feedback Loop: Blend corrected+transformed previous with current input
     - Border Handling: Configurable edge treatment (zeros, border, reflection)
 
     Advantages over LatentTransformPreprocessor:
     - Operates in image space (RGB domain) - more intuitive visual control
     - No VAE encode/decode artifacts from latent transforms
     - True image-space temporal feedback (not latent-space approximation)
+    - Color correction participates in feedback loop to prevent VAE brightness drift
 
     Processing Pipeline:
-    1. Get previous frame's output image (prev_image_result)
-    2. Transform the PREVIOUS output (zoom/pan/rotate creates accumulative motion)
-    3. Blend transformed previous with current input (feedback_strength controls mix)
+    1. Get previous frame's output image (prev_image_result) from VAE decode
+    2. Convert from [-1, 1] to [0, 1] range
+    3. Apply color correction to previous output (brightness/contrast/saturation/etc)
+    4. Apply geometric transforms to color-corrected previous (zoom/pan/rotate)
+    5. Blend corrected+transformed previous with current input (feedback_strength controls mix)
+    6. Clamp to [0, 1] and send to VAE encode
 
     Examples:
-    - zoom=1.05, feedback_strength=0.8: 5% zoom with strong feedback
-    - pan_x=0.01, feedback_strength=0.5: Panning with 50/50 input/feedback blend
-    - rotation=2.0, feedback_strength=1.0: Pure rotation feedback
+    - brightness=-0.1, feedback_strength=0.8: Correct VAE brightness bias with strong feedback
+    - zoom=1.05, saturation=1.2, feedback_strength=0.8: Zoom with saturated feedback
+    - pan_x=0.01, contrast=1.1, feedback_strength=0.5: Panning with punchy blend
 
     CRITICAL: Requires requires_sync_processing=true to avoid 1-frame delay!
     """
@@ -43,15 +46,57 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
     @classmethod
     def get_preprocessor_metadata(cls):
         return {
-            "display_name": "Feedback Transform (Zoom/Pan/Rotate + Feedback)",
-            "description": "Image-space feedback with geometric transformations",
+            "display_name": "Feedback Transform (Zoom/Pan/Rotate + Color + Feedback)",
+            "description": "Image-space feedback with color correction and geometric transformations",
             "parameters": {
                 "feedback_strength": {
                     "type": "float",
                     "default": 0.8,
                     "range": [0.0, 1.0],
                     "step": 0.01,
-                    "description": "Feedback blend strength (0.0 = pure input, 1.0 = pure transformed feedback)"
+                    "description": "Feedback blend strength (0.0 = pure input, 1.0 = pure corrected+transformed feedback)"
+                },
+                "brightness": {
+                    "type": "float",
+                    "default": 0.0,
+                    "range": [-1.0, 1.0],
+                    "step": 0.01,
+                    "description": "Brightness adjustment applied to feedback (-1.0 = black, 0.0 = neutral, 1.0 = white)"
+                },
+                "saturation": {
+                    "type": "float",
+                    "default": 1.0,
+                    "range": [0.0, 2.0],
+                    "step": 0.01,
+                    "description": "Saturation multiplier applied to feedback (0.0 = grayscale, 1.0 = neutral, 2.0 = hyper-saturated)"
+                },
+                "contrast": {
+                    "type": "float",
+                    "default": 1.0,
+                    "range": [0.5, 2.0],
+                    "step": 0.01,
+                    "description": "Contrast multiplier applied to feedback (0.5 = flat, 1.0 = neutral, 2.0 = high contrast)"
+                },
+                "black_level": {
+                    "type": "float",
+                    "default": 0.0,
+                    "range": [0.0, 0.3],
+                    "step": 0.001,
+                    "description": "Black level lift applied to feedback (raises minimum luminance)"
+                },
+                "gamma": {
+                    "type": "float",
+                    "default": 1.0,
+                    "range": [0.5, 2.0],
+                    "step": 0.01,
+                    "description": "Gamma correction applied to feedback (0.5 = brighter mids, 1.0 = neutral, 2.0 = darker mids)"
+                },
+                "temperature": {
+                    "type": "float",
+                    "default": 0.0,
+                    "range": [-1.0, 1.0],
+                    "step": 0.01,
+                    "description": "Color temperature applied to feedback (-1.0 = cooler/blue, 0.0 = neutral, 1.0 = warmer/orange)"
                 },
                 "zoom": {
                     "type": "float",
@@ -89,10 +134,10 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                 }
             },
             "use_cases": [
-                "Deforum-style camera motion",
-                "Feedback loops with geometric transforms",
-                "Smooth zoom/pan effects with temporal consistency",
-                "Image-space animation"
+                "Deforum-style camera motion with color correction",
+                "Feedback loops with color grading and geometric transforms",
+                "Smooth zoom/pan effects with brightness/contrast control",
+                "Image-space animation with temporal color consistency"
             ]
         }
 
@@ -100,6 +145,12 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                  pipeline_ref: Any,
                  image_resolution: int = 512,
                  feedback_strength: float = 0.8,
+                 brightness: float = 0.0,
+                 saturation: float = 1.0,
+                 contrast: float = 1.0,
+                 black_level: float = 0.0,
+                 gamma: float = 1.0,
+                 temperature: float = 0.0,
                  zoom: float = 1.0,
                  pan_x: float = 0.0,
                  pan_y: float = 0.0,
@@ -112,7 +163,13 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         Args:
             pipeline_ref: Reference to the StreamDiffusion pipeline instance (required)
             image_resolution: Output image resolution
-            feedback_strength: Feedback blend strength (0.0 = pure input, 1.0 = pure feedback)
+            feedback_strength: Feedback blend strength (0.0 = pure input, 1.0 = pure corrected+transformed feedback)
+            brightness: Brightness adjustment applied to feedback (-1.0 to 1.0)
+            saturation: Saturation multiplier applied to feedback (0.0 to 2.0)
+            contrast: Contrast multiplier applied to feedback (0.5 to 2.0)
+            black_level: Black level lift applied to feedback (0.0 to 0.3)
+            gamma: Gamma correction applied to feedback (0.5 to 2.0)
+            temperature: Color temperature applied to feedback (-1.0 to 1.0)
             zoom: Zoom factor (1.0 = no zoom, >1.0 = zoom in, <1.0 = zoom out)
             pan_x: Pan in X direction (normalized: -1.0 to 1.0 is full width)
             pan_y: Pan in Y direction (normalized: -1.0 to 1.0 is full height)
@@ -124,6 +181,12 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             pipeline_ref=pipeline_ref,
             image_resolution=image_resolution,
             feedback_strength=feedback_strength,
+            brightness=brightness,
+            saturation=saturation,
+            contrast=contrast,
+            black_level=black_level,
+            gamma=gamma,
+            temperature=temperature,
             zoom=zoom,
             pan_x=pan_x,
             pan_y=pan_y,
@@ -132,6 +195,12 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             **kwargs
         )
         self.feedback_strength = max(0.0, min(1.0, feedback_strength))  # Clamp to [0, 1]
+        self.brightness = brightness
+        self.saturation = saturation
+        self.contrast = contrast
+        self.black_level = black_level
+        self.gamma = gamma
+        self.temperature = temperature
         self.zoom = zoom
         self.pan_x = pan_x
         self.pan_y = pan_y
@@ -210,6 +279,81 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
 
         return grid
 
+    def _apply_color_correction_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Apply color correction to tensor (GPU-accelerated)
+
+        Args:
+            tensor: Input tensor [C, H, W] or [B, C, H, W] in range [0, 1]
+
+        Returns:
+            Color-corrected tensor [0, 1]
+        """
+        # Ensure batch dimension
+        original_shape = tensor.shape
+        if tensor.dim() == 3:
+            tensor = tensor.unsqueeze(0)  # [B, C, H, W]
+
+        result = tensor.clone()
+
+        # 1. Black Level (lift shadows) - applied first to establish new floor
+        if abs(self.black_level) > 1e-6:
+            # Compress range: [0, 1] -> [black_level, 1]
+            result = result * (1.0 - self.black_level) + self.black_level
+
+        # 2. Brightness (additive) - shift all values
+        if abs(self.brightness) > 1e-6:
+            result = result + self.brightness
+
+        # 3. Contrast (around 0.5 midpoint) - adjust tonal range
+        if abs(self.contrast - 1.0) > 1e-6:
+            # Contrast around midpoint 0.5
+            result = (result - 0.5) * self.contrast + 0.5
+
+        # 4. Gamma correction - adjust midtones
+        if abs(self.gamma - 1.0) > 1e-6:
+            # Clamp before gamma to avoid negative values
+            result = result.clamp(0, 1)
+            result = torch.pow(result, 1.0 / self.gamma)
+
+        # 5. Saturation (desaturate/saturate)
+        if abs(self.saturation - 1.0) > 1e-6:
+            # Convert to grayscale using luminance weights (Rec. 709)
+            # Y = 0.2126*R + 0.7152*G + 0.0722*B
+            weights = torch.tensor([0.2126, 0.7152, 0.0722],
+                                  device=result.device,
+                                  dtype=result.dtype).view(1, 3, 1, 1)
+            grayscale = (result * weights).sum(dim=1, keepdim=True)
+
+            # Blend between grayscale and original based on saturation
+            # saturation=0.0 -> grayscale, saturation=1.0 -> original, saturation=2.0 -> hyper
+            result = grayscale + self.saturation * (result - grayscale)
+
+        # 6. Temperature (color temperature shift)
+        if abs(self.temperature) > 1e-6:
+            # Temperature adjustment: shift blue/orange balance
+            # Positive = warmer (more orange), Negative = cooler (more blue)
+            temp_adjustment = torch.zeros_like(result)
+            if self.temperature > 0:
+                # Warmer: boost red, reduce blue
+                temp_adjustment[:, 0, :, :] = self.temperature * 0.1  # Red boost
+                temp_adjustment[:, 2, :, :] = -self.temperature * 0.1  # Blue reduction
+            else:
+                # Cooler: reduce red, boost blue
+                temp_adjustment[:, 0, :, :] = self.temperature * 0.1  # Red reduction
+                temp_adjustment[:, 2, :, :] = -self.temperature * 0.1  # Blue boost
+
+            result = result + temp_adjustment
+
+        # Final clamp to [0, 1] to prevent color space drift
+        result = result.clamp(0, 1)
+
+        # Restore original shape
+        if len(original_shape) == 3:
+            result = result.squeeze(0)
+
+        return result
+
     def _process_core(self, image: Image.Image) -> Image.Image:
         """
         Process using configurable blend of input image + transformed previous frame output
@@ -235,10 +379,13 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         # CRITICAL FIX: Convert from [-1, 1] (VAE output) to [0, 1] (image processing range)
         prev_output_tensor = (prev_output_tensor / 2.0 + 0.5).clamp(0, 1)
 
+        # STEP 1: Apply color correction to prev_output FIRST
+        prev_output_tensor = self._apply_color_correction_tensor(prev_output_tensor)
+
         # Convert input image to tensor
         input_tensor = self.pil_to_tensor(image).squeeze(0)  # Remove batch dim [C, H, W]
 
-        # Check if any transform is active
+        # STEP 2: Check if any transform is active
         needs_transform = (
             abs(self.zoom - 1.0) > 1e-6 or
             abs(self.pan_x) > 1e-6 or
@@ -247,7 +394,7 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         )
 
         if needs_transform:
-            # Transform the PREVIOUS output (accumulative motion)
+            # STEP 3: Transform the color-corrected PREVIOUS output (accumulative motion)
             # Add batch dimension for grid_sample
             prev_output_batch = prev_output_tensor.unsqueeze(0)  # [1, C, H, W]
 
@@ -282,7 +429,7 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             )
             transformed_prev = transformed_prev.squeeze(0)  # Remove batch
 
-        # Blend with configurable strength
+        # STEP 4: Blend color-corrected+transformed previous with input (feedback_strength controls mix)
         blended_tensor = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * transformed_prev
 
         # CRITICAL: Clamp to [0, 1] to prevent color space drift/accumulation
@@ -318,6 +465,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         # CRITICAL FIX: Convert from [-1, 1] (VAE output) to [0, 1] (image processing range)
         prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
 
+        # STEP 1: Apply color correction to prev_output FIRST
+        prev_output = self._apply_color_correction_tensor(prev_output)
+
         # Normalize input tensor to [0, 1] if needed
         input_tensor = tensor
         if input_tensor.max() > 1.0:
@@ -329,7 +479,7 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         if input_tensor.dim() == 4 and input_tensor.shape[0] == 1:
             input_tensor = input_tensor[0]  # Remove batch dimension
 
-        # Check if any transform is active
+        # STEP 2: Check if any transform is active
         needs_transform = (
             abs(self.zoom - 1.0) > 1e-6 or
             abs(self.pan_x) > 1e-6 or
@@ -338,7 +488,7 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         )
 
         if needs_transform:
-            # Transform the PREVIOUS output (accumulative motion)
+            # STEP 3: Transform the color-corrected PREVIOUS output (accumulative motion)
             # Add batch dimension for grid_sample
             if prev_output.dim() == 3:
                 prev_output_batch = prev_output.unsqueeze(0)  # [1, C, H, W]
@@ -380,7 +530,7 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                 if transformed_prev.shape[0] == 1:
                     transformed_prev = transformed_prev.squeeze(0)
 
-        # Blend with configurable strength
+        # STEP 4: Blend color-corrected+transformed previous with input (feedback_strength controls mix)
         blended_tensor = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * transformed_prev
 
         # CRITICAL: Clamp to [0, 1] to prevent color space drift/accumulation

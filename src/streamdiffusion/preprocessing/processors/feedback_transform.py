@@ -7,11 +7,10 @@ from .base import PipelineAwareProcessor
 
 class FeedbackTransformPreprocessor(PipelineAwareProcessor):
     """
-    Image-space feedback preprocessor with geometric transformations and color correction
+    Image-space feedback preprocessor with geometric transformations
 
-    Combines feedback loop with geometric transforms (zoom, pan, rotate) and integrated color
-    correction to prevent feedback drift. Operates in image space BEFORE VAE encoding, providing
-    Deforum-style motion with temporal consistency and brightness/color stability.
+    Combines feedback loop with geometric transforms (zoom, pan, rotate). Operates in image
+    space BEFORE VAE encoding, providing Deforum-style motion with temporal consistency.
 
     Key Features:
     - Feedback Loop: Blend input with previous output image
@@ -19,24 +18,21 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
     - Pan: Translate previous output in X/Y
     - Rotate: Rotate previous output around center
     - Border Handling: Configurable edge treatment (zeros, border, reflection)
-    - Color Correction: Brightness, saturation, contrast, gamma adjustments to prevent drift
 
     Advantages over LatentTransformPreprocessor:
     - Operates in image space (RGB domain) - more intuitive visual control
     - No VAE encode/decode artifacts from latent transforms
     - True image-space temporal feedback (not latent-space approximation)
-    - Integrated color correction prevents accumulative brightness/color drift
 
     Processing Pipeline:
     1. Get previous frame's output image (prev_image_result)
     2. Transform the PREVIOUS output (zoom/pan/rotate creates accumulative motion)
     3. Blend transformed previous with current input (feedback_strength controls mix)
-    4. Apply color correction to prevent drift (brightness compensation, etc.)
 
     Examples:
-    - zoom=1.05, feedback_strength=0.8, brightness=-0.02: 5% zoom with drift compensation
+    - zoom=1.05, feedback_strength=0.8: 5% zoom with strong feedback
     - pan_x=0.01, feedback_strength=0.5: Panning with 50/50 input/feedback blend
-    - rotation=2.0, feedback_strength=1.0, saturation=0.95: Pure rotation with desaturation
+    - rotation=2.0, feedback_strength=1.0: Pure rotation feedback
 
     CRITICAL: Requires requires_sync_processing=true to avoid 1-frame delay!
     """
@@ -47,8 +43,8 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
     @classmethod
     def get_preprocessor_metadata(cls):
         return {
-            "display_name": "Feedback Transform (Zoom/Pan/Rotate + Feedback + Color Correction)",
-            "description": "Image-space feedback with geometric transformations and integrated color correction",
+            "display_name": "Feedback Transform (Zoom/Pan/Rotate + Feedback)",
+            "description": "Image-space feedback with geometric transformations",
             "parameters": {
                 "feedback_strength": {
                     "type": "float",
@@ -90,41 +86,13 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                     "default": "zeros",
                     "options": ["zeros", "border", "reflection"],
                     "description": "How to handle borders: zeros (black), border (edge repeat), reflection (mirror)"
-                },
-                "brightness": {
-                    "type": "float",
-                    "default": 0.0,
-                    "range": [-1.0, 1.0],
-                    "step": 0.01,
-                    "description": "Brightness adjustment to prevent feedback drift (-1.0 = black, 0.0 = neutral, 1.0 = white)"
-                },
-                "saturation": {
-                    "type": "float",
-                    "default": 1.0,
-                    "range": [0.0, 2.0],
-                    "step": 0.01,
-                    "description": "Saturation multiplier (0.0 = grayscale, 1.0 = neutral, 2.0 = hyper-saturated)"
-                },
-                "contrast": {
-                    "type": "float",
-                    "default": 1.0,
-                    "range": [0.5, 2.0],
-                    "step": 0.01,
-                    "description": "Contrast multiplier (0.5 = flat, 1.0 = neutral, 2.0 = high contrast)"
-                },
-                "gamma": {
-                    "type": "float",
-                    "default": 1.0,
-                    "range": [0.5, 2.0],
-                    "step": 0.01,
-                    "description": "Gamma correction (0.5 = brighter mids, 1.0 = neutral, 2.0 = darker mids)"
                 }
             },
             "use_cases": [
-                "Deforum-style camera motion with color stability",
-                "Feedback loops with geometric transforms and brightness control",
+                "Deforum-style camera motion",
+                "Feedback loops with geometric transforms",
                 "Smooth zoom/pan effects with temporal consistency",
-                "Image-space animation with color correction"
+                "Image-space animation"
             ]
         }
 
@@ -137,13 +105,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                  pan_y: float = 0.0,
                  rotation: float = 0.0,
                  border_mode: Literal["zeros", "border", "reflection"] = "zeros",
-                 brightness: float = 0.0,
-                 saturation: float = 1.0,
-                 contrast: float = 1.0,
-                 gamma: float = 1.0,
                  **kwargs):
         """
-        Initialize feedback transform preprocessor with color correction
+        Initialize feedback transform preprocessor
 
         Args:
             pipeline_ref: Reference to the StreamDiffusion pipeline instance (required)
@@ -154,10 +118,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             pan_y: Pan in Y direction (normalized: -1.0 to 1.0 is full height)
             rotation: Rotation angle in degrees (positive = clockwise)
             border_mode: How to handle borders ("zeros", "border", "reflection")
-            brightness: Brightness adjustment (-0.5 to 0.5, use negative to prevent drift)
-            saturation: Saturation multiplier (0.0 to 2.0)
-            contrast: Contrast multiplier (0.5 to 2.0)
-            gamma: Gamma correction (0.5 to 2.0)
             **kwargs: Additional parameters passed to BasePreprocessor
         """
         super().__init__(
@@ -169,10 +129,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             pan_y=pan_y,
             rotation=rotation,
             border_mode=border_mode,
-            brightness=brightness,
-            saturation=saturation,
-            contrast=contrast,
-            gamma=gamma,
             **kwargs
         )
         self.feedback_strength = max(0.0, min(1.0, feedback_strength))  # Clamp to [0, 1]
@@ -181,10 +137,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         self.pan_y = pan_y
         self.rotation = rotation
         self.border_mode = border_mode
-        self.brightness = brightness
-        self.saturation = saturation
-        self.contrast = contrast
-        self.gamma = gamma
         self._first_frame = True
 
         # Map border_mode to grid_sample padding mode
@@ -207,60 +159,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                     return self.pipeline_ref.prev_image_result
         return None
 
-    def _apply_color_correction(self, tensor: torch.Tensor) -> torch.Tensor:
-        """
-        Apply color correction to tensor to prevent feedback drift
-
-        Args:
-            tensor: Input tensor [C, H, W] or [B, C, H, W] in range [0, 1]
-
-        Returns:
-            Color-corrected tensor [0, 1]
-        """
-        # Early exit if no correction needed
-        if (abs(self.brightness) < 1e-6 and
-            abs(self.saturation - 1.0) < 1e-6 and
-            abs(self.contrast - 1.0) < 1e-6 and
-            abs(self.gamma - 1.0) < 1e-6):
-            return tensor
-
-        # Ensure batch dimension for processing
-        original_shape = tensor.shape
-        if tensor.dim() == 3:
-            tensor = tensor.unsqueeze(0)  # [B, C, H, W]
-
-        result = tensor.clone()
-
-        # 1. Brightness (additive) - most important for preventing drift
-        if abs(self.brightness) > 1e-6:
-            result = result + self.brightness
-
-        # 2. Contrast (around 0.5 midpoint)
-        if abs(self.contrast - 1.0) > 1e-6:
-            result = (result - 0.5) * self.contrast + 0.5
-
-        # 3. Gamma correction - adjust midtones
-        if abs(self.gamma - 1.0) > 1e-6:
-            result = result.clamp(0, 1)
-            result = torch.pow(result, 1.0 / self.gamma)
-
-        # 4. Saturation (desaturate/saturate)
-        if abs(self.saturation - 1.0) > 1e-6:
-            # Convert to grayscale using luminance weights (Rec. 709)
-            weights = torch.tensor([0.2126, 0.7152, 0.0722],
-                                  device=result.device,
-                                  dtype=result.dtype).view(1, 3, 1, 1)
-            grayscale = (result * weights).sum(dim=1, keepdim=True)
-            result = grayscale + self.saturation * (result - grayscale)
-
-        # Final clamp to [0, 1]
-        result = result.clamp(0, 1)
-
-        # Restore original shape
-        if len(original_shape) == 3:
-            result = result.squeeze(0)
-
-        return result
 
     def _create_transform_grid(self, batch_size: int, channels: int, height: int, width: int, device: torch.device) -> torch.Tensor:
         """
@@ -390,9 +288,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         # CRITICAL: Clamp to [0, 1] to prevent color space drift/accumulation
         blended_tensor = blended_tensor.clamp(0, 1)
 
-        # Apply color correction to prevent feedback drift (e.g., brightness compensation)
-        blended_tensor = self._apply_color_correction(blended_tensor)
-
         # Convert back to PIL
         blended_pil = self.tensor_to_pil(blended_tensor)
 
@@ -490,9 +385,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
 
         # CRITICAL: Clamp to [0, 1] to prevent color space drift/accumulation
         blended_tensor = blended_tensor.clamp(0, 1)
-
-        # Apply color correction to prevent feedback drift (e.g., brightness compensation)
-        blended_tensor = self._apply_color_correction(blended_tensor)
 
         # Ensure correct output format
         if blended_tensor.dim() == 3:

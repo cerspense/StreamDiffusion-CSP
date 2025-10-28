@@ -4686,8 +4686,10 @@ engine_dir: "./engines/td"
                               self.ownerComp.par.Useprefxfeedback.eval())
         use_color_correction_feedback = (hasattr(self.ownerComp.par, 'Usecolorcorrectionfeedback') and
                                         self.ownerComp.par.Usecolorcorrectionfeedback.eval())
+        use_preprocess_color = (hasattr(self.ownerComp.par, 'Usepreprocesscolor') and
+                               self.ownerComp.par.Usepreprocesscolor.eval())
 
-        if use_image_feedback or use_color_correction_feedback:
+        if use_image_feedback or use_color_correction_feedback or use_preprocess_color:
             yaml_content += """# Multi-stage Image Preprocessing (Pre-Fx)
 image_preprocessing:
   enabled: true
@@ -4710,6 +4712,18 @@ image_preprocessing:
             if use_color_correction_feedback:
                 params = self.gather_fx_parameters_for_processor('color_correction_feedback')
                 yaml_content += f'    - type: "color_correction_feedback"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                # CRITICAL: Force sync processing to avoid 1-frame delay from pipelined orchestrator
+                yaml_content += f'        requires_sync_processing: true\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
+                processor_order += 1
+
+            if use_preprocess_color:
+                params = self.gather_fx_parameters_for_processor('preprocess_color')
+                yaml_content += f'    - type: "preprocess_color"\n'
                 yaml_content += f'      order: {processor_order}\n'
                 yaml_content += f'      enabled: true\n'
                 yaml_content += f'      params:\n'
@@ -6567,6 +6581,8 @@ td_settings:
             active_fx.append('post_process_xform_cc')
         if hasattr(self.ownerComp.par, 'Usepostprocesscolor') and self.ownerComp.par.Usepostprocesscolor.eval():
             active_fx.append('post_process_color')
+        if hasattr(self.ownerComp.par, 'Usepreprocesscolor') and self.ownerComp.par.Usepreprocesscolor.eval():
+            active_fx.append('preprocess_color')
 
         # Remove old Fx* params
         for par_tuple in self.ownerComp.customPars:

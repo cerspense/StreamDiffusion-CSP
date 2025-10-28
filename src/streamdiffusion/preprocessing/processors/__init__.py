@@ -23,6 +23,7 @@ from .realesrgan_trt import RealESRGANProcessor
 from .color_correction_feedback import ColorCorrectionFeedbackPreprocessor
 from .post_process_xform_cc import PostProcessTransformCCPreprocessor
 from .post_process_color import PostProcessColorPreprocessor
+from .preprocess_color import PreprocessColorPreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
 try:
@@ -83,6 +84,7 @@ _preprocessor_registry = {
     "color_correction_feedback": ColorCorrectionFeedbackPreprocessor,
     "post_process_xform_cc": PostProcessTransformCCPreprocessor,
     "post_process_color": PostProcessColorPreprocessor,
+    "preprocess_color": PreprocessColorPreprocessor,
 }
 
 # Add TensorRT preprocessors if available
@@ -186,6 +188,7 @@ __all__ = [
     "ColorCorrectionFeedbackPreprocessor",
     "PostProcessTransformCCPreprocessor",
     "PostProcessColorPreprocessor",
+    "PreprocessColorPreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",
     "register_preprocessor",

@@ -116,6 +116,15 @@ class PostProcessSharpenNoisePreprocessor(BasePreprocessor):
             **kwargs
         )
 
+        # Store parameters as instance attributes for OSC live updates
+        self.sharpen_amount = sharpen_amount
+        self.sharpen_radius = sharpen_radius
+        self.noise_strength = noise_strength
+        self.noise_period = noise_period
+        self.noise_octaves = noise_octaves
+        self.noise_persistence = noise_persistence
+        self.noise_lacunarity = noise_lacunarity
+
         # Cache for efficiency
         self._cached_gaussian_kernels = {}
         self._noise_offset = torch.rand(2, device=self.device, dtype=self.dtype) * 1000.0
@@ -271,25 +280,18 @@ class PostProcessSharpenNoisePreprocessor(BasePreprocessor):
         Returns:
             Image with noise added
         """
-        noise_strength = self.params.get('noise_strength', 0.0)
-
-        if noise_strength <= 0:
+        if self.noise_strength <= 0:
             return image
-
-        noise_period = self.params.get('noise_period', 4.0)
-        noise_octaves = self.params.get('noise_octaves', 3)
-        noise_persistence = self.params.get('noise_persistence', 0.5)
-        noise_lacunarity = self.params.get('noise_lacunarity', 2.0)
 
         batch_size, channels, height, width = image.shape
 
         # Generate fractal noise
         noise = self._generate_fractal_noise(
             (height, width),
-            noise_period,
-            noise_octaves,
-            noise_persistence,
-            noise_lacunarity
+            self.noise_period,
+            self.noise_octaves,
+            self.noise_persistence,
+            self.noise_lacunarity
         )
 
         # Expand noise to match image dimensions [B, C, H, W]
@@ -297,7 +299,7 @@ class PostProcessSharpenNoisePreprocessor(BasePreprocessor):
         noise = noise.repeat(batch_size, channels, 1, 1)
 
         # Add noise to image (noise is in [-1, 1], scale by strength)
-        noisy_image = image + noise * noise_strength
+        noisy_image = image + noise * self.noise_strength
 
         return torch.clamp(noisy_image, 0, 1)
 
@@ -330,15 +332,11 @@ class PostProcessSharpenNoisePreprocessor(BasePreprocessor):
         # Ensure correct device and dtype
         image_tensor = image_tensor.to(device=self.device, dtype=self.dtype)
 
-        # Get parameters
-        sharpen_amount = self.params.get('sharpen_amount', 0.5)
-        sharpen_radius = self.params.get('sharpen_radius', 1.0)
-
         result = image_tensor.clone()
 
         # Step 1: Sharpen
-        if sharpen_amount > 0:
-            result = self._unsharp_mask(result, sharpen_radius, sharpen_amount)
+        if self.sharpen_amount > 0:
+            result = self._unsharp_mask(result, self.sharpen_radius, self.sharpen_amount)
 
         # Step 2: Add fractal noise
         result = self._add_fractal_noise(result)

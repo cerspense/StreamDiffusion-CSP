@@ -587,6 +587,12 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         # CRITICAL: Clamp to [0, 1] to prevent color space drift/accumulation
         blended_tensor = blended_tensor.clamp(0, 1)
 
+        # CRITICAL FIX: Convert back to [-1, 1] range for VAE encoder
+        # Pipeline expects input in [-1, 1] range (black=-1, gray=0, white=1)
+        # We processed in [0, 1] for easier blending, now convert back
+        blended_tensor = (blended_tensor * 2.0) - 1.0
+        print(f"[FEEDBACK DEBUG] OUTPUT range after conversion to [-1,1]: min={blended_tensor.min().item():.4f}, max={blended_tensor.max().item():.4f}")
+
         # Ensure correct output format
         if blended_tensor.dim() == 3:
             blended_tensor = blended_tensor.unsqueeze(0)  # Add batch dimension back

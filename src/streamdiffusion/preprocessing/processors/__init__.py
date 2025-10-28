@@ -25,6 +25,7 @@ from .post_process_xform_cc import PostProcessTransformCCPreprocessor
 from .post_process_color import PostProcessColorPreprocessor
 from .post_process_sharpen_noise import PostProcessSharpenNoisePreprocessor
 from .preprocess_color import PreprocessColorPreprocessor
+from .preprocess_sharpen_noise import PreprocessSharpenNoisePreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
 try:
@@ -87,6 +88,7 @@ _preprocessor_registry = {
     "post_process_color": PostProcessColorPreprocessor,
     "post_process_sharpen_noise": PostProcessSharpenNoisePreprocessor,
     "preprocess_color": PreprocessColorPreprocessor,
+    "preprocess_sharpen_noise": PreprocessSharpenNoisePreprocessor,
 }
 
 # Add TensorRT preprocessors if available
@@ -192,6 +194,7 @@ __all__ = [
     "PostProcessColorPreprocessor",
     "PostProcessSharpenNoisePreprocessor",
     "PreprocessColorPreprocessor",
+    "PreprocessSharpenNoisePreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",
     "register_preprocessor",

@@ -6153,6 +6153,25 @@ td_settings:
             import traceback
             traceback.print_exc()
 
+    def Refreshfxmetadata(self):
+        """
+        Refresh Fx metadata table and regenerate dynamic parameters.
+        Called when Refreshfxmetadata parameter is pulsed.
+        This should be triggered after adding new processors to refresh the UI.
+        """
+        try:
+            # Refresh the metadata table
+            self.Getpreprocessors()
+
+            # Regenerate Fx parameters with updated metadata
+            self.update_fx_dynamic_parameters()
+
+            self.logger.log('Fx metadata refreshed and parameters updated', level='INFO')
+        except Exception as e:
+            self.logger.log(f'ERROR refreshing Fx metadata: {e}', level='ERROR')
+            import traceback
+            traceback.print_exc()
+
     def _extract_metadata_from_file(self, filepath):
         """
         Extract get_preprocessor_metadata() return value from a Python file
@@ -6502,6 +6521,8 @@ td_settings:
             active_fx.append('latent_transform')
         if hasattr(self.ownerComp.par, 'Usecolorcorrectionfeedback') and self.ownerComp.par.Usecolorcorrectionfeedback.eval():
             active_fx.append('color_correction_feedback')
+        if hasattr(self.ownerComp.par, 'Usepostprocessxformcc') and self.ownerComp.par.Usepostprocessxformcc.eval():
+            active_fx.append('post_process_xform_cc')
 
         # Remove old Fx* params
         for par_tuple in self.ownerComp.customPars:

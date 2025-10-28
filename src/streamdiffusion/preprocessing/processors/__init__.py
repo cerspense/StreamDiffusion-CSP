@@ -21,6 +21,7 @@ from .upscale import UpscalePreprocessor
 from .blur import BlurPreprocessor
 from .realesrgan_trt import RealESRGANProcessor
 from .color_correction_feedback import ColorCorrectionFeedbackPreprocessor
+from .post_process_xform_cc import PostProcessTransformCCPreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
 try:
@@ -79,6 +80,7 @@ _preprocessor_registry = {
     "blur": BlurPreprocessor,
     "realesrgan_trt": RealESRGANProcessor,
     "color_correction_feedback": ColorCorrectionFeedbackPreprocessor,
+    "post_process_xform_cc": PostProcessTransformCCPreprocessor,
 }
 
 # Add TensorRT preprocessors if available
@@ -180,6 +182,7 @@ __all__ = [
     "LatentTransformPreprocessor",
     "LatentTransformCCPreprocessor",
     "ColorCorrectionFeedbackPreprocessor",
+    "PostProcessTransformCCPreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",
     "register_preprocessor",

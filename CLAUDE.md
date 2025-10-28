@@ -378,6 +378,34 @@ latent_only_processors = ['latent_feedback', 'latent_transform', 'my_custom']
 - ✅ Include in YAML config generation
 - ✅ Filter from ControlNet dropdown (if latent-only)
 
+### Step 7: Refresh Metadata in TouchDesigner
+
+After adding a new processor, you need to refresh the metadata table so TouchDesigner knows about it:
+
+1. **Add the `Refreshfxmetadata` pulse parameter** (if not already added):
+   - Open TouchDesigner
+   - Select the StreamDiffusion component
+   - Add a **Pulse** parameter on the **Fx page**:
+     - Name: `Refreshfxmetadata`
+     - Label: "Refresh Fx Metadata"
+
+2. **Pulse to refresh:**
+   - Enable your processor toggle (e.g., `Usepostprocessxformcc`)
+   - **Pulse the `Refreshfxmetadata` button**
+   - Fx* parameters should appear automatically
+
+**What this does:**
+- Calls `Getpreprocessors()` to scan `__init__.py` and extract metadata
+- Calls `update_fx_dynamic_parameters()` to generate Fx* parameters
+- Logs "Fx metadata refreshed and parameters updated"
+
+**Alternative (from textport):**
+```python
+op('StreamDiffusion').Refreshfxmetadata()
+```
+
+**See also:** `StreamDiffusionTD/docs/FX_PARAMETER_REFRESH_GUIDE.md` for troubleshooting
+
 ---
 
 ## TouchDesigner Integration Pattern
@@ -416,11 +444,42 @@ def Fxparameterupdate(self, par):
     osc_address = f'/fx/{processor_type}/{param_name}'
     osc_out.sendOSC(osc_address, [par.eval()])
 
-# Python backend handler
+# Python backend handler (td_osc_handler.py)
 def _handle_fx_parameter(self, address, *args):
     # Parse: /fx/latent_transform/zoom -> processor='latent_transform', param='zoom'
+    # Uses fuzzy matching to find processor
     setattr(processor, param, args[0])
 ```
+
+**IMPORTANT - Fuzzy Matching:**
+
+The OSC handler (StreamDiffusionTD/td_osc_handler.py:413-471) uses **smart fuzzy matching** to handle naming mismatches:
+
+**Problem Example:**
+- Processor type in registry: `post_process_xform_cc` (abbreviated "xform")
+- Actual class name: `PostProcessTransformCCPreprocessor` (full word "Transform")
+- Simple conversion would fail: `PostProcessXformCcPreprocessor` ≠ `PostProcessTransformCCPreprocessor`
+
+**Solution - Component Matching:**
+1. Splits processor type into components: `['post', 'process', 'xform', 'cc']`
+2. Checks each component against class name:
+   - `'post'` ✓ (found in class name)
+   - `'process'` ✓ (found in class name)
+   - `'xform'` ✓ (special case: matches `'transform'`)
+   - `'cc'` ✓ (found in class name)
+3. Match ratio: 4/4 = 100% ≥ 70% threshold → ✅ Match!
+4. Updates parameter directly via `setattr()`
+
+**Key Features:**
+- ✅ Handles abbreviations (`xform` ↔ `transform`)
+- ✅ Works with different naming conventions
+- ✅ 70% match threshold for flexibility
+- ✅ No manual mapping needed for new processors
+
+**Naming Best Practices:**
+- Use consistent naming between registry key and class name when possible
+- Abbreviations are OK - fuzzy matcher handles them
+- Match ratio must be ≥ 70% (most components must match)
 
 ### YAML Configuration
 

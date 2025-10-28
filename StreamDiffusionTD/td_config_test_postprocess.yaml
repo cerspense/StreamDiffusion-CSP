@@ -1,0 +1,84 @@
+# StreamDiffusionTD Configuration - Testing post_process_xform_cc
+# Test configuration with high feedback and zoom to see accumulative effect
+
+# Base model configuration
+model_id: "stabilityai/sdxl-turbo"
+
+# Core StreamDiffusion parameters
+t_index_list: [22]
+width: 576
+height: 448
+device: "cuda"
+dtype: "float16"
+
+# Generation parameters
+guidance_scale: 1.0
+num_inference_steps: 50
+seed: 620649
+delta: 1.0
+
+# Prompt configuration
+prompt: "eye of a cyborg, Cybernetic Data Trails — streaming ribbons of luminous code trace each move."
+negative_prompt: "negative prompts do nothing"
+
+# Optimization settings
+mode: "img2img"
+frame_buffer_size: 1
+use_denoising_batch: true
+use_lcm_lora: true
+use_tiny_vae: true
+acceleration: "tensorrt"
+cfg_type: "self"
+
+# TensorRT engine directory
+engine_dir: "./engines/td"
+
+# ControlNet configuration (disabled)
+use_controlnet: false
+
+# IPAdapter configuration
+use_ipadapter: true
+ipadapters:
+  - ipadapter_model_path: "h94/IP-Adapter/sdxl_models/ip-adapter_sdxl.bin"
+    image_encoder_path: "h94/IP-Adapter/sdxl_models/image_encoder"
+    scale: 0.721
+    enabled: true
+    type: regular
+
+# Latent Preprocessing - DISABLED for this test
+latent_preprocessing:
+  enabled: false
+
+# Image Postprocessing - TEST NEW PROCESSOR
+image_postprocessing:
+  enabled: true
+  processors:
+    - type: "post_process_xform_cc"
+      order: 1
+      enabled: true
+      params:
+        # High feedback to see accumulative effect
+        feedback_strength: 0.95
+        # Zoom in slowly (>1.0 = zoom in)
+        zoom: 1.01
+        # No pan/rotation for cleaner test
+        pan_x: 0.0
+        pan_y: 0.0
+        rotation: 0.0
+        # Color correction settings
+        brightness: 0.0
+        saturation: 1.0
+        black_level: 0.0
+        border_mode: "zeros"
+
+# TouchDesigner specific settings
+td_settings:
+  osc_receive_port: 4026
+  osc_transmit_port: 4035
+  input_mem_name: "StreamDiffusionTD12sdffdzsdfsdf"
+  output_mem_name: "StreamDiffusionTD12sdffdzsdfsdf_out"
+  enable_timing_stats: false
+  fps_target: 30
+
+# Enable debug frame capture
+debug_capture_frames: true

@@ -874,7 +874,7 @@ class StreamDiffusion:
             x = self.image_processor.preprocess(x, self.height, self.width).to(
                 device=self.device, dtype=self.dtype
             )
-            
+
             # IMAGE PREPROCESSING HOOKS: After built-in preprocessing, before filtering
             x = self._apply_image_preprocessing_hooks(x)
 
@@ -936,16 +936,11 @@ class StreamDiffusion:
         # FRAME CAPTURE: After image postprocessing
         if self.frame_capturer and self.frame_capturer.should_capture():
             self.frame_capturer.capture_stage("after_img_postprocess", x_output, stage_order=6)
-
-        # CRITICAL: Convert from VAE output range [-1, 1] to image range [0, 1]
-        # This ensures consistent output regardless of postprocessing
-        x_output = (x_output / 2.0 + 0.5).clamp(0, 1)
-
         end.record()
         torch.cuda.synchronize()
         inference_time = start.elapsed_time(end) / 1000
         self.inference_time_ema = 0.9 * self.inference_time_ema + 0.1 * inference_time
-
+        
         return x_output
 
     # =========================================================================

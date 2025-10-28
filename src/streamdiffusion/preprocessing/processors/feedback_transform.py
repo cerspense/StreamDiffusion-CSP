@@ -386,6 +386,16 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         # Convert input image to tensor
         input_tensor = self.pil_to_tensor(image).squeeze(0)  # Remove batch dim [C, H, W]
 
+        # Normalize input tensor to [0, 1] if needed (same as _process_tensor_core)
+        # Input may come from VaeImageProcessor which outputs [-1, 1]
+        if input_tensor.min() < 0.0:
+            # [-1, 1] range (from VAE preprocessor) - convert to [0, 1]
+            input_tensor = (input_tensor / 2.0 + 0.5).clamp(0, 1)
+        elif input_tensor.max() > 1.0:
+            # [0, 255] range
+            input_tensor = input_tensor / 255.0
+        # else: already in [0, 1]
+
         # STEP 2: Check if any transform is active
         needs_transform = (
             abs(self.zoom - 1.0) > 1e-6 or
@@ -471,9 +481,15 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         prev_output = self._apply_color_correction_tensor(prev_output)
 
         # Normalize input tensor to [0, 1] if needed
+        # Input comes from image_processor.preprocess() which outputs [-1, 1]
         input_tensor = tensor
-        if input_tensor.max() > 1.0:
+        if input_tensor.min() < 0.0:
+            # [-1, 1] range (from VAE preprocessor) - convert to [0, 1]
+            input_tensor = (input_tensor / 2.0 + 0.5).clamp(0, 1)
+        elif input_tensor.max() > 1.0:
+            # [0, 255] range
             input_tensor = input_tensor / 255.0
+        # else: already in [0, 1]
 
         # Ensure both tensors have same format for blending
         if prev_output.dim() == 4 and prev_output.shape[0] == 1:

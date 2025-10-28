@@ -1,0 +1,57 @@
+# Test config for post_process_color processor
+# Tests color correction in post-processing stage
+
+model:
+  model_id_or_path: "KBlueLeaf/kohaku-v2.1"
+  enable_acceleration: false
+  enable_taesd: true
+  use_fp16: true
+  use_xformers: true
+
+stream:
+  width: 512
+  height: 512
+  num_inference_steps: 1
+  cfg_type: "none"
+  delta: 1.0
+  use_denoising_batch: false
+
+# Latent stage: Transform for motion
+latent_preprocessing:
+  enabled: true
+  processors:
+    - type: "latent_transform"
+      order: 1
+      enabled: true
+      params:
+        zoom: 1.01
+        pan_x: 0.002
+        pan_y: 0.0
+        rotation: 0.5
+        feedback_strength: 0.85
+        border_mode: "zeros"
+        noise_strength: 0.0
+        noise_seed_mix: 0.5
+
+# Post-processing stage: Color correction
+image_postprocessing:
+  enabled: true
+  processors:
+    - type: "post_process_color"
+      order: 1
+      enabled: true
+      params:
+        brightness: 0.1
+        saturation: 1.2
+        contrast: 1.1
+        black_level: 0.05
+        gamma: 1.0
+        temperature: 0.1
+
+seed_config:
+  mode: "single"
+  base_seed: 42
+
+prompt:
+  prompt: "a beautiful landscape with mountains and trees, vibrant colors, high quality"
+  negative_prompt: "blurry, low quality, distorted"

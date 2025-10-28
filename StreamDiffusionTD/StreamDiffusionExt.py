@@ -4766,6 +4766,48 @@ latent_preprocessing:
 
         yaml_content += "\n"
 
+        # Add Image Postprocessing (Post-Fx processors for image domain)
+        use_post_xform_cc = (hasattr(self.ownerComp.par, 'Usepostprocessxformcc') and
+                             self.ownerComp.par.Usepostprocessxformcc.eval())
+        use_post_color = (hasattr(self.ownerComp.par, 'Usepostprocesscolor') and
+                         self.ownerComp.par.Usepostprocesscolor.eval())
+
+        if use_post_xform_cc or use_post_color:
+            yaml_content += """# Multi-stage Image Postprocessing (Post-Fx)
+image_postprocessing:
+  enabled: true
+  processors:
+"""
+            processor_order = 1
+
+            if use_post_xform_cc:
+                params = self.gather_fx_parameters_for_processor('post_process_xform_cc')
+                yaml_content += f'    - type: "post_process_xform_cc"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                # CRITICAL: Force sync processing to avoid 1-frame delay
+                yaml_content += f'        requires_sync_processing: true\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
+                processor_order += 1
+
+            if use_post_color:
+                params = self.gather_fx_parameters_for_processor('post_process_color')
+                yaml_content += f'    - type: "post_process_color"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
+        else:
+            yaml_content += """# Multi-stage Image Postprocessing (disabled)
+# image_postprocessing:
+#   enabled: false
+"""
+
+        yaml_content += "\n"
+
         # Add TouchDesigner specific settings
         osc_in_port = self.ownerComp.par.Oscinport.eval()
         osc_out_port = self.ownerComp.par.Oscoutport.eval()
@@ -6523,6 +6565,8 @@ td_settings:
             active_fx.append('color_correction_feedback')
         if hasattr(self.ownerComp.par, 'Usepostprocessxformcc') and self.ownerComp.par.Usepostprocessxformcc.eval():
             active_fx.append('post_process_xform_cc')
+        if hasattr(self.ownerComp.par, 'Usepostprocesscolor') and self.ownerComp.par.Usepostprocesscolor.eval():
+            active_fx.append('post_process_color')
 
         # Remove old Fx* params
         for par_tuple in self.ownerComp.customPars:

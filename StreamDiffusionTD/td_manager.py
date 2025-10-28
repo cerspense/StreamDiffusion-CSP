@@ -30,8 +30,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from streamdiffusion.config import load_config, create_wrapper_from_config
 from streamdiffusion import StreamDiffusionWrapper
-from frame_capture_debug import FrameCaptureDebug
-from synthetic_input_generator import SyntheticInputGenerator
 
 
 class TouchDesignerManager:
@@ -114,23 +112,6 @@ class TouchDesignerManager:
         self.mode = self.config.get('mode', 'img2img')
         print(f"Initialized in {self.mode} mode")
 
-        # Frame capture debug (if enabled)
-        self.frame_capturer = FrameCaptureDebug(
-            enabled=self.config.get('debug_capture_frames', False),
-            skip_frames=30,
-            capture_count=4
-        )
-
-        # Synthetic input generator (for frame capture testing)
-        self.synthetic_input = None
-        if self.frame_capturer.enabled:
-            self.synthetic_input = SyntheticInputGenerator(
-                width=self.config.get('width', 576),
-                height=self.config.get('height', 448),
-                frequency=4.0,
-                speed=0.02
-            )
-
         print("TouchDesigner Manager initialized successfully")
     
     def update_parameters(self, params: Dict[str, Any]) -> None:
@@ -167,23 +148,17 @@ class TouchDesignerManager:
         if self.streaming:
             print("Already streaming!")
             return
-
+            
         try:
             self._initialize_memory_interfaces()
-
-            # Wire up frame capturer to pipeline (if enabled)
-            if self.frame_capturer.enabled:
-                self.wrapper.stream.frame_capturer = self.frame_capturer
-                print("[FRAME CAPTURE] Linked to pipeline")
-
             self.streaming = True
-
+            
             # Start streaming in separate thread (non-blocking)
             self.stream_thread = threading.Thread(target=self._streaming_loop, daemon=True)
             self.stream_thread.start()
-
+            
             print(f"Streaming started - Method: {self.stream_method}")
-
+            
         except Exception as e:
             print(f"Failed to start streaming: {e}")
             raise
@@ -412,10 +387,6 @@ class TouchDesignerManager:
                         time.sleep(0.001)  # Brief sleep if no input
                         continue
 
-                    # FRAME CAPTURE: Capture raw input frame
-                    if self.frame_capturer.should_capture():
-                        self.frame_capturer.capture_stage("input", input_image, stage_order=0)
-
                     # Convert input from uint8 [0,255] to float [0,1] like main_sdtd.py
                     if input_image.dtype == np.uint8:
                         input_image = input_image.astype(np.float32) / 255.0
@@ -428,11 +399,7 @@ class TouchDesignerManager:
 
                     # Transform input image
                     output_image = self.wrapper.img2img(input_image)
-
-                # FRAME CAPTURE: Capture final output frame
-                if self.frame_capturer.should_capture():
-                    self.frame_capturer.capture_stage("output", output_image, stage_order=7)
-
+                
                 # Send output frame to TouchDesigner
                 self._send_output_frame(output_image)
                 
@@ -448,15 +415,6 @@ class TouchDesignerManager:
                 # Update frame counters
                 self.frame_count += 1
                 self.total_frame_count += 1
-
-                # FRAME CAPTURE: Increment frame counter (must be after processing)
-                self.frame_capturer.increment_frame()
-
-                # Auto-shutdown after frame capture completes
-                if self.frame_capturer.enabled and self.frame_capturer.is_complete:
-                    print("\n[FRAME CAPTURE] Complete! Stopping streaming...")
-                    self.streaming = False
-                    break
                 
                 # Update performance metrics for display
                 loop_end = time.time()
@@ -518,30 +476,25 @@ class TouchDesignerManager:
         print("\\nStreaming loop ended")
     
     def _get_input_frame(self) -> Optional[np.ndarray]:
-        """Get input frame from TouchDesigner (platform-specific) or synthetic generator"""
+        """Get input frame from TouchDesigner (platform-specific)"""
         try:
-            # SYNTHETIC INPUT MODE: Use generated fractal noise for frame capture testing
-            if self.synthetic_input is not None:
-                return self.synthetic_input.generate_frame()
-
-            # NORMAL MODE: Get from TouchDesigner
             if self.is_macos and self.syphon_handler:
                 # Get frame from Syphon
                 frame = self.syphon_handler.capture_input_frame()
                 return frame
-
+            
             elif self.input_memory:
                 # Get frame from SharedMemory
                 width = self.config['width']
                 height = self.config['height']
-
+                
                 # Create numpy array view of shared memory
                 frame = np.ndarray(
-                    (height, width, 3),
-                    dtype=np.uint8,
+                    (height, width, 3), 
+                    dtype=np.uint8, 
                     buffer=self.input_memory.buf
                 )
-
+                
                 return frame.copy()  # Copy to avoid memory issues
             
             return None

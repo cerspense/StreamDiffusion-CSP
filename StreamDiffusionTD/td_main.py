@@ -11,7 +11,6 @@ import os
 import sys
 import json
 import signal
-import argparse
 
 # Add StreamDiffusion to path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -22,8 +21,8 @@ from td_osc_handler import OSCParameterHandler
 
 class StreamDiffusionTD:
     """Main application class"""
-
-    def __init__(self, debug_capture_frames: bool = False):
+    
+    def __init__(self):
         print("StreamDiffusionTD v3.0.0 - LivePeer Fork Edition")
         print("=" * 60)
 
@@ -33,9 +32,6 @@ class StreamDiffusionTD:
 
         from streamdiffusion.config import load_config
         yaml_config = load_config(yaml_config_path)
-
-        # Add debug frame capture flag to config
-        yaml_config['debug_capture_frames'] = debug_capture_frames
 
         # Get TouchDesigner-specific settings from YAML
         td_settings = yaml_config.get('td_settings', {})
@@ -49,12 +45,6 @@ class StreamDiffusionTD:
         # Get OSC ports from YAML
         listen_port = td_settings.get('osc_transmit_port', 8247)  # Python listens
         transmit_port = td_settings.get('osc_receive_port', 8248)  # Python transmits
-
-        # DEBUG MODE: Use different ports to avoid conflicts with running TouchDesigner
-        if debug_capture_frames:
-            listen_port = 9999  # Different port for debug mode
-            transmit_port = 9998
-            print(f"[DEBUG MODE] Using alternate OSC ports: Listen {listen_port}, Transmit {transmit_port}")
         
         # DEBUG: Print the actual config being loaded
         print("=" * 80)
@@ -85,9 +75,9 @@ class StreamDiffusionTD:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         
-        print(f"OSC: Listen {listen_port} -> Transmit {transmit_port}")
-        print(f"Memory: {input_mem} -> {output_mem}")
-        print(f"Platform: {self.manager.stream_method}")
+        print(f"📡 OSC: Listen {listen_port} → Transmit {transmit_port}")
+        print(f"🖼️  Memory: {input_mem} → {output_mem}")
+        print(f"🔧 Platform: {self.manager.stream_method}")
         print("=" * 60)
     
     
@@ -97,8 +87,8 @@ class StreamDiffusionTD:
             # Start OSC communication
             self.osc_handler.start()
             
-            print("Ready! Send /start_streaming via OSC or manually call manager.start_streaming()")
-            print("Tips:")
+            print("🚀 Ready! Send /start_streaming via OSC or manually call manager.start_streaming()")
+            print("💡 Tips:")
             print("   - Use /prompt_list for prompt blending")
             print("   - Use /controlnets for multi-ControlNet")
             print("   - Parameters are batched for optimal performance")
@@ -116,33 +106,33 @@ class StreamDiffusionTD:
             self._wait_for_shutdown()
             
         except KeyboardInterrupt:
-            print("\\nInterrupted by user")
+            print("\\n👋 Interrupted by user")
         except Exception as e:
-            print(f"ERROR: {e}")
+            print(f"❌ Error: {e}")
             raise
         finally:
             self.shutdown()
     
     def shutdown(self):
         """Graceful shutdown"""
-        print("Shutting down...")
-
+        print("🔄 Shutting down...")
+        
         try:
             self.manager.stop_streaming()
             self.osc_handler.stop()
-            print("Shutdown complete")
+            print("✅ Shutdown complete")
         except Exception as e:
-            print(f"Shutdown error: {e}")
+            print(f"⚠️  Shutdown error: {e}")
     
     def _signal_handler(self, sig, frame):
         """Handle shutdown signals"""
-        print(f"\\nReceived signal {sig}")
+        print(f"\\n📶 Received signal {sig}")
         self.shutdown()
         sys.exit(0)
-
+    
     def request_shutdown(self):
         """Request application shutdown (called by OSC /stop command)"""
-        print("\\nStop command received via OSC")
+        print("\\n🛑 Stop command received via OSC")
         self.shutdown_requested = True
     
     def _wait_for_shutdown(self):
@@ -166,17 +156,8 @@ class StreamDiffusionTD:
 def main():
     """Main entry point - reads from td_config.yaml"""
 
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='StreamDiffusion TouchDesigner Backend')
-    parser.add_argument(
-        '--debug-capture-frames',
-        action='store_true',
-        help='Enable frame capture debug mode (skips 30 frames, captures 4 frames at all pipeline stages)'
-    )
-    args = parser.parse_args()
-
     # Create and start application (no longer needs stream_config.json)
-    app = StreamDiffusionTD(debug_capture_frames=args.debug_capture_frames)
+    app = StreamDiffusionTD()
     app.start()
 
 

@@ -41,9 +41,9 @@ class PreprocessSharpenNoisePreprocessor(BasePreprocessor):
                 "noise_strength": {
                     "type": "float",
                     "default": 0.0,
-                    "range": [0.0, 0.2],
-                    "step": 0.001,
-                    "description": "Fractal noise strength (0 = no noise, 0.05 = subtle grain, 0.2 = heavy)"
+                    "range": [0.0, 1.0],
+                    "step": 0.01,
+                    "description": "Fractal noise strength (0 = no noise, 0.1 = subtle, 0.3 = moderate, 1.0 = extreme)"
                 },
                 "noise_scale": {
                     "type": "float",

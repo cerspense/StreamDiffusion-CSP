@@ -87,6 +87,9 @@ class StreamDiffusion:
         self.prev_image_result = None
         self.prev_latent_result = None
 
+        # Frame capture debug (optional, set externally)
+        self.frame_capturer = None
+
         self.pipe = pipe
         self.image_processor = VaeImageProcessor(pipe.vae_scale_factor)
 
@@ -874,7 +877,11 @@ class StreamDiffusion:
             
             # IMAGE PREPROCESSING HOOKS: After built-in preprocessing, before filtering
             x = self._apply_image_preprocessing_hooks(x)
-            
+
+            # FRAME CAPTURE: After image preprocessing
+            if self.frame_capturer and self.frame_capturer.should_capture():
+                self.frame_capturer.capture_stage("after_img_preprocess", x, stage_order=1)
+
             if self.similar_image_filter:
                 x = self.similar_filter(x)
                 if x is None:
@@ -882,7 +889,11 @@ class StreamDiffusion:
                     return self.prev_image_result
             
             x_t_latent = self.encode_image(x)
-            
+
+            # FRAME CAPTURE: After VAE encoding
+            if self.frame_capturer and self.frame_capturer.should_capture():
+                self.frame_capturer.capture_stage("after_vae_encode", x_t_latent, stage_order=2)
+
             # LATENT PREPROCESSING HOOKS: After VAE encoding, before diffusion
             x_t_latent = self._apply_latent_preprocessing_hooks(x_t_latent)
         else:
@@ -892,18 +903,34 @@ class StreamDiffusion:
             )
         
         x_0_pred_out = self.predict_x0_batch(x_t_latent)
-        
+
+        # FRAME CAPTURE: After diffusion (before latent postprocessing)
+        if self.frame_capturer and self.frame_capturer.should_capture():
+            self.frame_capturer.capture_stage("after_diffusion", x_0_pred_out, stage_order=3)
+
         # LATENT POSTPROCESSING HOOKS: After diffusion, before VAE decoding
         x_0_pred_out = self._apply_latent_postprocessing_hooks(x_0_pred_out)
+
+        # FRAME CAPTURE: After latent postprocessing
+        if self.frame_capturer and self.frame_capturer.should_capture():
+            self.frame_capturer.capture_stage("after_latent_postprocess", x_0_pred_out, stage_order=4)
         
         # Store latent result for latent feedback processors
         self.prev_latent_result = x_0_pred_out.detach().clone()
 
-        
+
         x_output = self.decode_image(x_0_pred_out).detach().clone()
-        
+
+        # FRAME CAPTURE: After VAE decoding
+        if self.frame_capturer and self.frame_capturer.should_capture():
+            self.frame_capturer.capture_stage("after_vae_decode", x_output, stage_order=5)
+
         # IMAGE POSTPROCESSING HOOKS: After VAE decoding, before final output
         x_output = self._apply_image_postprocessing_hooks(x_output)
+
+        # FRAME CAPTURE: After image postprocessing
+        if self.frame_capturer and self.frame_capturer.should_capture():
+            self.frame_capturer.capture_stage("after_img_postprocess", x_output, stage_order=6)
 
         self.prev_image_result = x_output
         end.record()

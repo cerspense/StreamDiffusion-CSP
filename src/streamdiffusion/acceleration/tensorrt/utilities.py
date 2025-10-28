@@ -366,6 +366,10 @@ class Engine:
         for name, tensor in self.tensors.items():
             self.context.set_tensor_address(name, tensor.data_ptr())
 
+        # TEMPORARY: Disable CUDA graphs due to CUDA 12+ API incompatibility
+        # TODO: Fix cudaGraphInstantiate for CUDA 12+
+        use_cuda_graph = False
+
         if use_cuda_graph:
             if self.cuda_graph_instance is not None:
                 CUASSERT(cudart.cudaGraphLaunch(self.cuda_graph_instance, stream.ptr))
@@ -381,7 +385,23 @@ class Engine:
                 )
                 self.context.execute_async_v3(stream.ptr)
                 self.graph = CUASSERT(cudart.cudaStreamEndCapture(stream.ptr))
-                self.cuda_graph_instance = CUASSERT(cudart.cudaGraphInstantiate(self.graph, 0))
+                # CUDA 12+ API: cudaGraphInstantiate(pGraphExec**, graph, flags)
+                # The first argument is now a pointer-to-pointer for the output handle
+                # We need to provide all 3 arguments explicitly
+                import inspect
+                sig = inspect.signature(cudart.cudaGraphInstantiate)
+                num_params = len(sig.parameters)
+
+                if num_params == 3:
+                    # CUDA 12+ style: needs (pGraphExec**, graph, flags)
+                    # But Python bindings handle the pointer internally, so we pass (graph, pGraphExec_placeholder, flags)
+                    # Actually the Python bindings return (err, handle), we need to pass placeholder as first arg
+                    err, self.cuda_graph_instance = cudart.cudaGraphInstantiate(self.graph, None, 0)
+                    if err != cudart.cudaError_t.cudaSuccess:
+                        raise RuntimeError(f"cudaGraphInstantiate failed: {err}")
+                else:
+                    # CUDA 11 style: (graph, flags)
+                    self.cuda_graph_instance = CUASSERT(cudart.cudaGraphInstantiate(self.graph, 0))
         else:
             noerror = self.context.execute_async_v3(stream.ptr)
             if not noerror:

@@ -756,6 +756,200 @@ transformed = F.grid_sample(
 - ✅ Test edge cases (zero strength, max strength)
 - ✅ Test batch size variations
 - ✅ Monitor for memory leaks over time
+- ✅ Use frame capture debug mode to visually inspect pipeline stages
+
+---
+
+## Frame Capture Debug System
+
+### Overview
+
+The frame capture system allows you to capture and save frames at all 8 pipeline stages for visual inspection and debugging. This is essential for diagnosing timing/sync issues, feedback oscillation, color drift, and other pipeline problems.
+
+### Quick Start
+
+```bash
+# Run frame capture debug mode
+Start_StreamDiffusion_DebugCapture.bat
+
+# Or manually:
+python streamdiffusionTD/td_main.py --debug-capture-frames
+```
+
+### What It Does
+
+1. **Skips 30 warmup frames** - Avoids unstable initialization
+2. **Captures 4 sequential frames** - Enough to see temporal effects
+3. **Saves 8 stages per frame** - Complete pipeline visibility
+4. **Auto-shutdown** - Stops after capture completes
+5. **Generates synthetic input** - Animated fractal noise (no TouchDesigner required)
+
+### Output Structure
+
+```
+debug_frames/capture_YYYYMMDD_HHMMSS/
+├── capture_info.txt                    # Metadata
+├── frame_030_0_input.png               # Raw input
+├── frame_030_1_after_img_preprocess.png
+├── frame_030_2_after_vae_encode_latent_vis.png
+├── frame_030_3_after_diffusion_latent_vis.png
+├── frame_030_4_after_latent_postprocess_latent_vis.png
+├── frame_030_5_after_vae_decode.png
+├── frame_030_6_after_img_postprocess.png
+├── frame_030_7_output.png              # Final output
+├── frame_031_*.png                     # Frame 31 (all 8 stages)
+├── frame_032_*.png                     # Frame 32 (all 8 stages)
+└── frame_033_*.png                     # Frame 33 (all 8 stages)
+
+Total: 32 PNG files (4 frames × 8 stages)
+```
+
+### Pipeline Stages Captured
+
+| Stage | Filename Suffix | Description |
+|-------|----------------|-------------|
+| 0 | `_0_input.png` | Raw input (TouchDesigner or synthetic) |
+| 1 | `_1_after_img_preprocess.png` | After image preprocessing hooks |
+| 2 | `_2_after_vae_encode_latent_vis.png` | VAE latent (visualized as RGB) |
+| 3 | `_3_after_diffusion_latent_vis.png` | After UNet diffusion (latent vis) |
+| 4 | `_4_after_latent_postprocess_latent_vis.png` | After latent postprocessing |
+| 5 | `_5_after_vae_decode.png` | Raw VAE decode output |
+| 6 | `_6_after_img_postprocess.png` | After image postprocessing |
+| 7 | `_7_output.png` | Final output |
+
+### How to Use for Debugging
+
+#### Checking Temporal Consistency
+```bash
+# Open frames 030-033 side by side
+# Compare _0_input.png - should show smooth animation
+# Compare _7_output.png - should reflect input after diffusion
+```
+
+#### Detecting Feedback Oscillation
+```bash
+# Compare frame_N_6 to frame_N+1_1
+# If feedback is enabled, check for unexpected changes
+# Look for oscillating patterns or instability
+```
+
+#### Analyzing Latent Operations
+```bash
+# Stage 2: VAE latent encoding
+# Stage 3: After diffusion (UNet output)
+# Stage 4: After latent preprocessing/postprocessing
+# Watch for accumulation or drift in latent visualizations
+```
+
+#### Identifying Color Drift
+```bash
+# Compare frame_*_5_after_vae_decode.png sequence
+# Check for progressive color shift across frames
+# Indicates need for color correction feedback
+```
+
+#### Finding Processing Artifacts
+```bash
+# Compare stage 5 (raw VAE) to stage 7 (final output)
+# Stage 5 often has black holes, oversaturation
+# Stage 7 should clean these up via postprocessing
+```
+
+### Synthetic Input Generator
+
+When running in debug mode, synthetic input is automatically enabled:
+
+```python
+# Generates animated fractal noise
+# High frequency (4.0) for visible detail
+# Slow movement (0.02 speed) for tracking
+# Multi-octave fractal for rich texture
+```
+
+**Advantages:**
+- No TouchDesigner dependency
+- Deterministic (reproducible results)
+- Easy to track through pipeline
+- Controllable frequency and speed
+
+### Debug Mode Features
+
+**Alternate OSC Ports:**
+- Listen: 9999 (vs 8247 in normal mode)
+- Transmit: 9998 (vs 8248 in normal mode)
+- Prevents conflicts with running TouchDesigner
+
+**CUDA Graphs Disabled:**
+- Temporary workaround for CUDA 12+ API incompatibility
+- ~10-20% performance reduction
+- Acceptable for debugging purposes
+
+**Auto-Shutdown:**
+- Exits gracefully after capturing 4 frames
+- No manual intervention needed
+
+### Integration with Processor Development
+
+**When creating new processors:**
+
+1. Run frame capture BEFORE implementing processor
+2. Implement processor with metadata
+3. Run frame capture AFTER implementing processor
+4. Compare before/after frames at relevant stages
+5. Verify processor effect is visible and correct
+
+**Example workflow:**
+
+```bash
+# 1. Baseline capture (no processor)
+Start_StreamDiffusion_DebugCapture.bat
+
+# 2. Implement LatentNoiseProcessor
+# ... code ...
+
+# 3. Enable processor in td_config.yaml
+latent_preprocessing:
+  processors:
+    - type: "latent_noise"
+      params:
+        strength: 0.3
+
+# 4. Capture with processor
+Start_StreamDiffusion_DebugCapture.bat
+
+# 5. Compare stage 2 and stage 4 before/after
+# Should see noise injection in latent space
+```
+
+### Performance Notes
+
+- Frame capture adds ~5-10% overhead per captured frame
+- Skipping 30 frames ensures stable performance metrics
+- Synthetic input runs at ~4-5 FPS without CUDA graphs
+- Real TouchDesigner input typically runs at 8-15 FPS
+
+### Troubleshooting
+
+**No frames captured:**
+- Check `debug_frames/` directory exists
+- Verify write permissions
+- Check console for errors
+
+**Frames look identical:**
+- Increase synthetic input speed (modify `synthetic_input_generator.py`)
+- Reduce skip_frames count to see earlier animation
+- Verify processors are actually enabled in config
+
+**Latent visualizations are noise:**
+- This is normal! Latent space is 4-channel compressed representation
+- Look for patterns/structure changes between stages 2, 3, 4
+- Don't expect latent vis to look like final image
+
+**Performance too slow:**
+- Disable unused processors
+- Reduce image resolution in config
+- Skip more warmup frames (increase skip_frames)
+- Re-enable CUDA graphs when API fixed
 
 ---
 

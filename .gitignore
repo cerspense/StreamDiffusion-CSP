@@ -220,6 +220,9 @@ images/outputs/*
 images/inputs/*
 controlnet_test_*
 
+# Frame capture debug output
+debug_frames/
+
 # Demo uploads directory
 demo/realtime-img2img/uploads/
 Install_StreamDiffusion.bat

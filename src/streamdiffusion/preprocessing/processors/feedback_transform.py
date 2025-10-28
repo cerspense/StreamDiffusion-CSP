@@ -492,7 +492,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         # CRITICAL FIX: prev_image_result is ALWAYS from VAE decode (always [-1, 1] range)
         # But VAE doesn't actually output the full [-1, 1] range - it has a gray floor
         # We need to REMAP the actual VAE range to [0, 1] to prevent gray accumulation
-        print(f"[FEEDBACK DEBUG] prev_output BEFORE conversion: min={prev_output.min().item():.4f}, max={prev_output.max().item():.4f}")
 
         # Get actual min/max from VAE output
         actual_min = prev_output.min()
@@ -506,27 +505,19 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             # Fallback if min == max (uniform color)
             prev_output = (prev_output / 2.0 + 0.5).clamp(0, 1)
 
-        print(f"[FEEDBACK DEBUG] prev_output AFTER remapping: min={prev_output.min().item():.4f}, max={prev_output.max().item():.4f}")
-
         # STEP 1: Apply color correction to prev_output FIRST
         prev_output = self._apply_color_correction_tensor(prev_output)
-        print(f"[FEEDBACK DEBUG] prev_output AFTER color correction: min={prev_output.min().item():.4f}, max={prev_output.max().item():.4f}")
 
         # Normalize input tensor to [0, 1] if needed
         # Input comes from image_processor.preprocess() which outputs [-1, 1]
         input_tensor = tensor
-        print(f"[FEEDBACK DEBUG] input_tensor BEFORE normalization: min={input_tensor.min().item():.4f}, max={input_tensor.max().item():.4f}")
         if input_tensor.min() < 0.0:
             # [-1, 1] range (from VAE preprocessor) - convert to [0, 1]
             input_tensor = (input_tensor / 2.0 + 0.5).clamp(0, 1)
-            print(f"[FEEDBACK DEBUG] input_tensor converted from [-1,1] to [0,1]")
         elif input_tensor.max() > 1.0:
             # [0, 255] range
             input_tensor = input_tensor / 255.0
-            print(f"[FEEDBACK DEBUG] input_tensor converted from [0,255] to [0,1]")
-        else:
-            print(f"[FEEDBACK DEBUG] input_tensor already in [0,1] range")
-        print(f"[FEEDBACK DEBUG] input_tensor AFTER normalization: min={input_tensor.min().item():.4f}, max={input_tensor.max().item():.4f}")
+        # else: already in [0, 1]
 
         # Ensure both tensors have same format for blending
         if prev_output.dim() == 4 and prev_output.shape[0] == 1:
@@ -595,7 +586,6 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         # Pipeline expects input in [-1, 1] range (black=-1, gray=0, white=1)
         # We processed in [0, 1] for easier blending, now convert back
         blended_tensor = (blended_tensor * 2.0) - 1.0
-        print(f"[FEEDBACK DEBUG] OUTPUT range after conversion to [-1,1]: min={blended_tensor.min().item():.4f}, max={blended_tensor.max().item():.4f}")
 
         # Ensure correct output format
         if blended_tensor.dim() == 3:

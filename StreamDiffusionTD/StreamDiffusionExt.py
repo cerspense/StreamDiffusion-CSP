@@ -6607,10 +6607,10 @@ td_settings:
             active_fx.append('post_process_xform_cc')
         if hasattr(self.ownerComp.par, 'Usepostprocesscolor') and self.ownerComp.par.Usepostprocesscolor.eval():
             active_fx.append('post_process_color')
-        if hasattr(self.ownerComp.par, 'Usepreprocesscolor') and self.ownerComp.par.Usepreprocesscolor.eval():
-            active_fx.append('preprocess_color')
         if hasattr(self.ownerComp.par, 'Usepostprocesssharpennoise') and self.ownerComp.par.Usepostprocesssharpennoise.eval():
             active_fx.append('post_process_sharpen_noise')
+        if hasattr(self.ownerComp.par, 'Usepreprocesscolor') and self.ownerComp.par.Usepreprocesscolor.eval():
+            active_fx.append('preprocess_color')
         if hasattr(self.ownerComp.par, 'Usefeedbacktransform') and self.ownerComp.par.Usefeedbacktransform.eval():
             active_fx.append('feedback_transform')
 

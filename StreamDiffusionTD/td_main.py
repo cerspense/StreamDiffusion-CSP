@@ -74,11 +74,10 @@ class StreamDiffusionTD:
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-
-        # Note: Emoji prints removed due to Windows console encoding issues (cp1252)
-        print(f"OSC: Listen {listen_port} -> Transmit {transmit_port}")
-        print(f"Memory: {input_mem} -> {output_mem}")
-        print(f"Platform: {self.manager.stream_method}")
+        
+        print(f"📡 OSC: Listen {listen_port} → Transmit {transmit_port}")
+        print(f"🖼️  Memory: {input_mem} → {output_mem}")
+        print(f"🔧 Platform: {self.manager.stream_method}")
         print("=" * 60)
     
     

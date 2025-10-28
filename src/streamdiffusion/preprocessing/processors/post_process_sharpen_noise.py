@@ -1,215 +1,349 @@
-"""
-Post-Process Sharpen & Noise Processor
-
-Applies sharpening and noise injection in image space after VAE decode and color correction.
-
-Features:
-- Unsharp mask sharpening with configurable radius and amount
-- Fine noise injection for film grain / texture effects
-- Operates in image postprocessing stage (after color correction)
-- GPU-accelerated processing
-
-Author: StreamDiffusion Team
-Date: 2025-10-28
-"""
-
 import torch
 import torch.nn.functional as F
-from typing import Any, Dict
+import numpy as np
+from PIL import Image
+from typing import Union
 from .base import BasePreprocessor
 
 
 class PostProcessSharpenNoisePreprocessor(BasePreprocessor):
     """
-    Post-processing stage sharpening and noise injection.
+    Post-processing processor combining image sharpening with fractal noise injection.
 
-    This processor operates in image space after VAE decode and color correction,
-    applying unsharp mask sharpening and fine noise for texture enhancement.
+    Operates after VAE decode to:
+    - Sharpen image details with configurable radius and amount
+    - Add multi-octave fractal noise with adjustable period and strength
 
-    Processing Order (in image postprocessing stage):
-    1. Unsharp mask sharpening (if sharpen_amount > 0)
-    2. Noise injection (if noise_amount > 0)
-    3. Final clamping to [0, 1]
-
-    Sharpen Parameters:
-    - sharpen_radius: Gaussian blur radius for unsharp mask (larger = broader sharpening)
-    - sharpen_amount: Sharpening strength (0 = off, 1 = moderate, 2 = strong)
-
-    Noise Parameters:
-    - noise_amount: Noise injection strength (0 = off, 0.1 = subtle grain, 0.5 = heavy)
+    Perfect for adding texture and enhancing details in the final output.
     """
 
     @classmethod
-    def get_preprocessor_metadata(cls) -> Dict[str, Any]:
-        """Get metadata for TouchDesigner integration"""
+    def get_preprocessor_metadata(cls):
         return {
-            "display_name": "Post-Process Sharpen & Noise",
-            "description": "Image postprocessing with sharpening and noise injection",
+            "display_name": "Sharpen + Noise",
+            "description": "Post-processing that combines sharpening with fractal noise injection. Enhances details and adds texture to final output.",
             "parameters": {
+                # Sharpen controls
+                "sharpen_amount": {
+                    "type": "float",
+                    "default": 0.5,
+                    "range": [0.0, 2.0],
+                    "step": 0.01,
+                    "description": "Sharpening strength (0 = no sharpen, 1 = normal, 2 = extreme)"
+                },
                 "sharpen_radius": {
                     "type": "float",
                     "default": 1.0,
                     "range": [0.1, 5.0],
                     "step": 0.1,
-                    "description": "Sharpen blur radius (larger = broader sharpening)"
+                    "description": "Sharpening radius in pixels (affects detail scale)"
                 },
-                "sharpen_amount": {
+                # Noise controls
+                "noise_strength": {
                     "type": "float",
                     "default": 0.0,
-                    "range": [0.0, 3.0],
-                    "step": 0.01,
-                    "description": "Sharpen strength (0 = off, 1 = moderate, 2 = strong)"
+                    "range": [0.0, 0.3],
+                    "step": 0.001,
+                    "description": "Fractal noise strength (0 = no noise, 0.1 = subtle, 0.3 = strong)"
                 },
-                "noise_amount": {
+                "noise_period": {
                     "type": "float",
-                    "default": 0.0,
-                    "range": [0.0, 1.0],
-                    "step": 0.01,
-                    "description": "Noise injection amount (0 = off, 0.1 = subtle grain)"
+                    "default": 4.0,
+                    "range": [1.0, 64.0],
+                    "step": 0.5,
+                    "description": "Noise period/frequency (lower = finer grain, higher = coarser)"
                 },
+                "noise_octaves": {
+                    "type": "int",
+                    "default": 3,
+                    "range": [1, 6],
+                    "step": 1,
+                    "description": "Number of noise octaves for fractal detail (more = richer texture)"
+                },
+                "noise_persistence": {
+                    "type": "float",
+                    "default": 0.5,
+                    "range": [0.1, 1.0],
+                    "step": 0.05,
+                    "description": "How much each octave contributes (lower = smoother, higher = rougher)"
+                },
+                "noise_lacunarity": {
+                    "type": "float",
+                    "default": 2.0,
+                    "range": [1.0, 4.0],
+                    "step": 0.1,
+                    "description": "Frequency multiplier between octaves (controls texture complexity)"
+                }
             },
             "use_cases": [
-                "Post-decode sharpening for detail enhancement",
-                "Film grain / texture injection",
-                "Final image refinement after color grading"
+                "Detail enhancement with texture",
+                "Film grain simulation",
+                "Organic texture addition",
+                "Final output sharpening"
             ]
         }
 
-    def __init__(
-        self,
-        sharpen_radius: float = 1.0,
-        sharpen_amount: float = 0.0,
-        noise_amount: float = 0.0,
-        **kwargs
-    ):
+    def __init__(self,
+                 sharpen_amount: float = 0.5,
+                 sharpen_radius: float = 1.0,
+                 noise_strength: float = 0.0,
+                 noise_period: float = 4.0,
+                 noise_octaves: int = 3,
+                 noise_persistence: float = 0.5,
+                 noise_lacunarity: float = 2.0,
+                 **kwargs):
         """
-        Initialize post-process sharpen & noise processor.
+        Initialize PostProcessSharpenNoise preprocessor
 
         Args:
-            sharpen_radius: Gaussian blur radius for unsharp mask (0.1-5.0)
-            sharpen_amount: Sharpening strength (0.0-3.0, 0=off)
-            noise_amount: Noise injection strength (0.0-1.0, 0=off)
+            sharpen_amount: Sharpening strength
+            sharpen_radius: Blur radius for unsharp masking
+            noise_strength: Fractal noise injection strength
+            noise_period: Base noise frequency/period
+            noise_octaves: Number of fractal octaves
+            noise_persistence: Amplitude falloff for each octave
+            noise_lacunarity: Frequency multiplier between octaves
+            **kwargs: Additional parameters
         """
         super().__init__(
-            sharpen_radius=sharpen_radius,
             sharpen_amount=sharpen_amount,
-            noise_amount=noise_amount,
+            sharpen_radius=sharpen_radius,
+            noise_strength=noise_strength,
+            noise_period=noise_period,
+            noise_octaves=noise_octaves,
+            noise_persistence=noise_persistence,
+            noise_lacunarity=noise_lacunarity,
             **kwargs
         )
-        self.sharpen_radius = sharpen_radius
-        self.sharpen_amount = sharpen_amount
-        self.noise_amount = noise_amount
 
-    def _process_core(self, image):
-        """Not used - we use GPU tensor processing"""
-        raise NotImplementedError("Use _process_tensor_core for GPU processing")
+        # Cache for efficiency
+        self._cached_gaussian_kernels = {}
+        self._noise_offset = torch.rand(2, device=self.device, dtype=self.dtype) * 1000.0
 
-    def _apply_gaussian_blur(self, tensor: torch.Tensor, radius: float) -> torch.Tensor:
+    def _create_gaussian_kernel(self, size: int, sigma: float) -> torch.Tensor:
+        """Create 2D Gaussian kernel for blurring"""
+        coords = torch.arange(size, dtype=self.dtype, device=self.device)
+        coords = coords - (size - 1) / 2
+        y_grid, x_grid = torch.meshgrid(coords, coords, indexing='ij')
+        gaussian = torch.exp(-(x_grid**2 + y_grid**2) / (2 * sigma**2))
+        return gaussian / gaussian.sum()
+
+    def _get_gaussian_kernel(self, sigma: float) -> torch.Tensor:
+        """Get cached Gaussian kernel"""
+        size = max(3, int(6 * sigma + 1))
+        if size % 2 == 0:
+            size += 1
+
+        key = (size, sigma)
+        if key not in self._cached_gaussian_kernels:
+            self._cached_gaussian_kernels[key] = self._create_gaussian_kernel(size, sigma)
+
+        return self._cached_gaussian_kernels[key]
+
+    def _apply_kernel(self, image: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
+        """Apply convolution kernel to image"""
+        num_channels = image.shape[1]
+        padding = kernel.shape[-1] // 2
+
+        # Expand kernel for all channels
+        kernel_conv = kernel.unsqueeze(0).unsqueeze(0).repeat(num_channels, 1, 1, 1)
+
+        return F.conv2d(image, kernel_conv, padding=padding, groups=num_channels)
+
+    def _gaussian_blur(self, image: torch.Tensor, sigma: float) -> torch.Tensor:
+        """Apply Gaussian blur"""
+        kernel = self._get_gaussian_kernel(sigma)
+        return self._apply_kernel(image, kernel)
+
+    def _unsharp_mask(self, image: torch.Tensor, radius: float, amount: float) -> torch.Tensor:
         """
-        Apply Gaussian blur for unsharp mask.
+        Apply unsharp masking for sharpening
 
         Args:
-            tensor: [B, C, H, W] image tensor
-            radius: Blur radius (sigma for Gaussian kernel)
-
-        Returns:
-            Blurred tensor
-        """
-        # Calculate kernel size from radius (must be odd)
-        kernel_size = int(2 * round(radius * 3) + 1)
-        if kernel_size % 2 == 0:
-            kernel_size += 1
-        kernel_size = max(3, kernel_size)  # Minimum size 3
-
-        # Create 1D Gaussian kernel
-        sigma = radius
-        x = torch.arange(kernel_size, dtype=self.dtype, device=self.device) - kernel_size // 2
-        gauss_1d = torch.exp(-x.pow(2) / (2 * sigma ** 2))
-        gauss_1d = gauss_1d / gauss_1d.sum()
-
-        # Create 2D Gaussian kernel from outer product of 1D kernels
-        gauss_2d = gauss_1d.unsqueeze(0) * gauss_1d.unsqueeze(1)  # [kernel_size, kernel_size]
-        gauss_2d = gauss_2d / gauss_2d.sum()  # Normalize
-
-        # Expand kernel to match input channels: [out_channels, in_channels/groups, kH, kW]
-        # For depthwise convolution: groups=C, so kernel is [C, 1, kH, kW]
-        B, C, H, W = tensor.shape
-        kernel = gauss_2d.unsqueeze(0).unsqueeze(0).expand(C, 1, kernel_size, kernel_size)
-
-        # Apply depthwise convolution (each channel blurred independently)
-        padding = kernel_size // 2
-        blurred = F.conv2d(tensor, kernel, padding=padding, groups=C)
-
-        return blurred
-
-    def _apply_unsharp_mask(self, tensor: torch.Tensor, radius: float, amount: float) -> torch.Tensor:
-        """
-        Apply unsharp mask sharpening.
-
-        Formula: sharpened = original + amount * (original - blurred)
-
-        Args:
-            tensor: [B, C, H, W] image tensor in [0, 1]
-            radius: Blur radius for unsharp mask
+            image: Input tensor [B, C, H, W]
+            radius: Blur radius (sigma)
             amount: Sharpening strength
 
         Returns:
-            Sharpened tensor
+            Sharpened image
         """
-        if amount <= 1e-6:
-            return tensor
+        if amount <= 0:
+            return image
 
-        # Apply Gaussian blur
-        blurred = self._apply_gaussian_blur(tensor, radius)
+        # Create blurred version
+        blurred = self._gaussian_blur(image, radius)
 
-        # Unsharp mask: original + amount * (original - blurred)
-        sharpened = tensor + amount * (tensor - blurred)
+        # Create mask (original - blurred)
+        mask = image - blurred
 
-        return sharpened
+        # Apply sharpening: original + amount * mask
+        sharpened = image + amount * mask
 
-    def _inject_noise(self, tensor: torch.Tensor, amount: float) -> torch.Tensor:
+        return torch.clamp(sharpened, 0, 1)
+
+    def _generate_perlin_noise_2d(self, shape: tuple, period: float) -> torch.Tensor:
         """
-        Inject fine noise for film grain / texture effect.
+        Generate 2D Perlin-style gradient noise
 
         Args:
-            tensor: [B, C, H, W] image tensor in [0, 1]
-            amount: Noise strength (0.0-1.0)
+            shape: (height, width)
+            period: Base frequency/period of the noise
 
         Returns:
-            Tensor with noise injected
+            Noise tensor [H, W]
         """
-        if amount <= 1e-6:
-            return tensor
+        height, width = shape
 
-        # Generate fine-grained noise (per-pixel)
-        noise = torch.randn_like(tensor) * amount
+        # Create coordinate grid
+        y = torch.linspace(0, height / period, height, device=self.device, dtype=self.dtype)
+        x = torch.linspace(0, width / period, width, device=self.device, dtype=self.dtype)
 
-        # Add noise
-        noisy = tensor + noise
+        # Add random offset to vary noise pattern each time
+        y = y + self._noise_offset[0]
+        x = x + self._noise_offset[1]
 
-        return noisy
+        yy, xx = torch.meshgrid(y, x, indexing='ij')
 
-    def _process_tensor_core(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Simple gradient noise using sine waves
+        # This creates a smooth, organic noise pattern
+        noise = torch.sin(xx * 2 * np.pi) * torch.cos(yy * 2 * np.pi)
+        noise += torch.sin(xx * 4 * np.pi + 1.5) * torch.cos(yy * 4 * np.pi + 1.5) * 0.5
+        noise += torch.sin(xx * 8 * np.pi + 3.0) * torch.cos(yy * 8 * np.pi + 3.0) * 0.25
+
+        # Normalize to [-1, 1]
+        noise = noise / (1.0 + 0.5 + 0.25)
+
+        return noise
+
+    def _generate_fractal_noise(self, shape: tuple, base_period: float,
+                                octaves: int, persistence: float,
+                                lacunarity: float) -> torch.Tensor:
         """
-        GPU-accelerated sharpen and noise processing.
+        Generate multi-octave fractal noise
 
         Args:
-            tensor: [B, C, H, W] image tensor in [0, 1] range
+            shape: (height, width)
+            base_period: Base frequency/period
+            octaves: Number of octaves to combine
+            persistence: Amplitude multiplier for each octave (typically 0.5)
+            lacunarity: Frequency multiplier for each octave (typically 2.0)
 
         Returns:
-            Processed tensor with sharpening and noise, clamped to [0, 1]
+            Fractal noise tensor [H, W] in range [-1, 1]
         """
-        result = tensor
+        height, width = shape
+        noise = torch.zeros(height, width, device=self.device, dtype=self.dtype)
 
-        # 1. Apply sharpening (if enabled)
-        if abs(self.sharpen_amount) > 1e-6:
-            result = self._apply_unsharp_mask(result, self.sharpen_radius, self.sharpen_amount)
+        amplitude = 1.0
+        frequency = 1.0
+        max_amplitude = 0.0
 
-        # 2. Inject noise (if enabled)
-        if abs(self.noise_amount) > 1e-6:
-            result = self._inject_noise(result, self.noise_amount)
+        for octave in range(octaves):
+            # Generate noise at this octave's frequency
+            octave_noise = self._generate_perlin_noise_2d(
+                shape,
+                base_period / frequency
+            )
 
-        # 3. Final clamp to [0, 1]
-        result = result.clamp(0, 1)
+            # Add to accumulator with current amplitude
+            noise += octave_noise * amplitude
+
+            # Track max amplitude for normalization
+            max_amplitude += amplitude
+
+            # Update for next octave
+            amplitude *= persistence
+            frequency *= lacunarity
+
+        # Normalize to [-1, 1]
+        if max_amplitude > 0:
+            noise = noise / max_amplitude
+
+        return noise
+
+    def _add_fractal_noise(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Add fractal noise to image
+
+        Args:
+            image: Input tensor [B, C, H, W]
+
+        Returns:
+            Image with noise added
+        """
+        noise_strength = self.params.get('noise_strength', 0.0)
+
+        if noise_strength <= 0:
+            return image
+
+        noise_period = self.params.get('noise_period', 4.0)
+        noise_octaves = self.params.get('noise_octaves', 3)
+        noise_persistence = self.params.get('noise_persistence', 0.5)
+        noise_lacunarity = self.params.get('noise_lacunarity', 2.0)
+
+        batch_size, channels, height, width = image.shape
+
+        # Generate fractal noise
+        noise = self._generate_fractal_noise(
+            (height, width),
+            noise_period,
+            noise_octaves,
+            noise_persistence,
+            noise_lacunarity
+        )
+
+        # Expand noise to match image dimensions [B, C, H, W]
+        noise = noise.unsqueeze(0).unsqueeze(0)
+        noise = noise.repeat(batch_size, channels, 1, 1)
+
+        # Add noise to image (noise is in [-1, 1], scale by strength)
+        noisy_image = image + noise * noise_strength
+
+        return torch.clamp(noisy_image, 0, 1)
+
+    def _process_core(self, image: Image.Image) -> Image.Image:
+        """Process PIL image (fallback path)"""
+        # Convert to tensor
+        tensor = self.pil_to_tensor(image)
+        tensor = tensor.squeeze(0)  # Remove batch dimension if present
+
+        # Process on GPU
+        processed = self._process_tensor_core(tensor)
+
+        # Convert back to PIL
+        return self.tensor_to_pil(processed)
+
+    def _process_tensor_core(self, image_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        GPU-optimized processing: sharpen + noise
+
+        Args:
+            image_tensor: [B, C, H, W] or [C, H, W] in range [0, 1]
+
+        Returns:
+            Processed tensor, same shape
+        """
+        # Ensure batch dimension
+        if image_tensor.dim() == 3:
+            image_tensor = image_tensor.unsqueeze(0)
+
+        # Ensure correct device and dtype
+        image_tensor = image_tensor.to(device=self.device, dtype=self.dtype)
+
+        # Get parameters
+        sharpen_amount = self.params.get('sharpen_amount', 0.5)
+        sharpen_radius = self.params.get('sharpen_radius', 1.0)
+
+        result = image_tensor.clone()
+
+        # Step 1: Sharpen
+        if sharpen_amount > 0:
+            result = self._unsharp_mask(result, sharpen_radius, sharpen_amount)
+
+        # Step 2: Add fractal noise
+        result = self._add_fractal_noise(result)
+
+        # Final clamp to ensure valid range
+        result = torch.clamp(result, 0, 1)
 
         return result

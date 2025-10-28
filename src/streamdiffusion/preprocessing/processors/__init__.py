@@ -23,6 +23,7 @@ from .preprocess_sharpen_noise import PreprocessSharpenNoisePreprocessor
 from .preprocess_sharpen import PreprocessSharpenPreprocessor
 from .preprocess_morphology import PreprocessMorphologyPreprocessor
 from .feedback_morphology import FeedbackMorphologyPreprocessor
+from .post_process_morphology import PostProcessMorphologyPreprocessor
 from .latent_noise import LatentNoisePreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
@@ -84,6 +85,7 @@ _preprocessor_registry = {
     "preprocess_sharpen": PreprocessSharpenPreprocessor,
     "preprocess_morphology": PreprocessMorphologyPreprocessor,
     "feedback_morphology": FeedbackMorphologyPreprocessor,
+    "post_process_morphology": PostProcessMorphologyPreprocessor,
     "latent_noise": LatentNoisePreprocessor,
 }
 
@@ -188,6 +190,7 @@ __all__ = [
     "PreprocessSharpenPreprocessor",
     "PreprocessMorphologyPreprocessor",
     "FeedbackMorphologyPreprocessor",
+    "PostProcessMorphologyPreprocessor",
     "LatentNoisePreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",

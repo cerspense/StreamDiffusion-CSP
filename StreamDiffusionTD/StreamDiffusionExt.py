@@ -4869,8 +4869,10 @@ latent_preprocessing:
                          self.ownerComp.par.Usepostprocesscolor.eval())
         use_post_sharpen_noise = (hasattr(self.ownerComp.par, 'Usepostprocesssharpennoise') and
                                  self.ownerComp.par.Usepostprocesssharpennoise.eval())
+        use_post_morphology = (hasattr(self.ownerComp.par, 'Usepostprocessmorphology') and
+                              self.ownerComp.par.Usepostprocessmorphology.eval())
 
-        if use_post_xform_cc or use_post_color or use_post_sharpen_noise:
+        if use_post_xform_cc or use_post_color or use_post_sharpen_noise or use_post_morphology:
             yaml_content += """# Multi-stage Image Postprocessing (Post-Fx)
 image_postprocessing:
   enabled: true
@@ -4903,6 +4905,16 @@ image_postprocessing:
             if use_post_sharpen_noise:
                 params = self.gather_fx_parameters_for_processor('post_process_sharpen_noise')
                 yaml_content += f'    - type: "post_process_sharpen_noise"\n'
+                yaml_content += f'      order: {processor_order}\n'
+                yaml_content += f'      enabled: true\n'
+                yaml_content += f'      params:\n'
+                for param_name, param_value in params.items():
+                    yaml_content += f'        {param_name}: {param_value}\n'
+                processor_order += 1
+
+            if use_post_morphology:
+                params = self.gather_fx_parameters_for_processor('post_process_morphology')
+                yaml_content += f'    - type: "post_process_morphology"\n'
                 yaml_content += f'      order: {processor_order}\n'
                 yaml_content += f'      enabled: true\n'
                 yaml_content += f'      params:\n'
@@ -6687,6 +6699,8 @@ td_settings:
             active_fx.append('preprocess_morphology')
         if hasattr(self.ownerComp.par, 'Usefeedbackmorphology') and self.ownerComp.par.Usefeedbackmorphology.eval():
             active_fx.append('feedback_morphology')
+        if hasattr(self.ownerComp.par, 'Usepostprocessmorphology') and self.ownerComp.par.Usepostprocessmorphology.eval():
+            active_fx.append('post_process_morphology')
         if hasattr(self.ownerComp.par, 'Uselatentnoise') and self.ownerComp.par.Uselatentnoise.eval():
             active_fx.append('latent_noise')
         if hasattr(self.ownerComp.par, 'Usefeedbacktransform') and self.ownerComp.par.Usefeedbacktransform.eval():

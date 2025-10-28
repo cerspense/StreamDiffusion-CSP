@@ -75,9 +75,9 @@ class StreamDiffusionTD:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         
-        print(f"📡 OSC: Listen {listen_port} → Transmit {transmit_port}")
-        print(f"🖼️  Memory: {input_mem} → {output_mem}")
-        print(f"🔧 Platform: {self.manager.stream_method}")
+        print(f"OSC: Listen {listen_port} -> Transmit {transmit_port}")
+        print(f"Memory: {input_mem} -> {output_mem}")
+        print(f"Platform: {self.manager.stream_method}")
         print("=" * 60)
     
     

@@ -28,9 +28,10 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
     1. Get previous frame's output image (prev_image_result) from VAE decode
     2. Convert from [-1, 1] to [0, 1] range
     3. Apply color correction to previous output (brightness/contrast/saturation/etc)
-    4. Apply geometric transforms to color-corrected previous (zoom/pan/rotate)
-    5. Blend corrected+transformed previous with current input (feedback_strength controls mix)
-    6. Clamp to [0, 1] and send to VAE encode
+    4. Apply morphology to color-corrected previous (dilate/erode) - NEW!
+    5. Apply geometric transforms to morphed previous (zoom/pan/rotate)
+    6. Blend corrected+morphed+transformed previous with current input (feedback_strength controls mix)
+    7. Clamp to [0, 1] and send to VAE encode
 
     Examples:
     - brightness=-0.1, feedback_strength=0.8: Correct VAE brightness bias with strong feedback
@@ -131,6 +132,27 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                     "default": "zeros",
                     "options": ["zeros", "border", "reflection"],
                     "description": "How to handle borders: zeros (black), border (edge repeat), reflection (mirror)"
+                },
+                "dilate_amount": {
+                    "type": "float",
+                    "default": 0.0,
+                    "range": [0.0, 10.0],
+                    "step": 0.1,
+                    "description": "Dilation strength applied AFTER color correction, BEFORE transform (0 = off, expands bright areas)"
+                },
+                "erode_amount": {
+                    "type": "float",
+                    "default": 0.0,
+                    "range": [0.0, 10.0],
+                    "step": 0.1,
+                    "description": "Erosion strength applied AFTER color correction, BEFORE transform (0 = off, contracts bright areas)"
+                },
+                "kernel_size": {
+                    "type": "int",
+                    "default": 3,
+                    "range": [3, 15],
+                    "step": 2,
+                    "description": "Kernel size for morphology (must be odd, larger = stronger effect)"
                 }
             },
             "use_cases": [
@@ -156,6 +178,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
                  pan_y: float = 0.0,
                  rotation: float = 0.0,
                  border_mode: Literal["zeros", "border", "reflection"] = "zeros",
+                 dilate_amount: float = 0.0,
+                 erode_amount: float = 0.0,
+                 kernel_size: int = 3,
                  **kwargs):
         """
         Initialize feedback transform preprocessor
@@ -175,6 +200,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             pan_y: Pan in Y direction (normalized: -1.0 to 1.0 is full height)
             rotation: Rotation angle in degrees (positive = clockwise)
             border_mode: How to handle borders ("zeros", "border", "reflection")
+            dilate_amount: Dilation strength (iterations)
+            erode_amount: Erosion strength (iterations)
+            kernel_size: Size of morphological kernel (must be odd)
             **kwargs: Additional parameters passed to BasePreprocessor
         """
         super().__init__(
@@ -192,6 +220,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
             pan_y=pan_y,
             rotation=rotation,
             border_mode=border_mode,
+            dilate_amount=dilate_amount,
+            erode_amount=erode_amount,
+            kernel_size=kernel_size,
             **kwargs
         )
         self.feedback_strength = max(0.0, min(1.0, feedback_strength))  # Clamp to [0, 1]
@@ -206,6 +237,9 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
         self.pan_y = pan_y
         self.rotation = rotation
         self.border_mode = border_mode
+        self.dilate_amount = dilate_amount
+        self.erode_amount = erode_amount
+        self.kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1  # Ensure odd
         self._first_frame = True
 
         # Map border_mode to grid_sample padding mode
@@ -219,6 +253,81 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
     def reset(self):
         """Reset the processor state (useful for new sequences)"""
         self._first_frame = True
+
+    def _create_morphology_kernel(self, size: int) -> torch.Tensor:
+        """Create circular morphological kernel"""
+        kernel = torch.zeros(size, size, dtype=self.dtype, device=self.device)
+        center = size // 2
+        for i in range(size):
+            for j in range(size):
+                if (i - center) ** 2 + (j - center) ** 2 <= center ** 2:
+                    kernel[i, j] = 1.0
+        return kernel / kernel.sum()
+
+    def _apply_morphology_kernel(self, image: torch.Tensor, kernel: torch.Tensor, mode: str) -> torch.Tensor:
+        """Apply morphological operation"""
+        num_channels = image.shape[1]
+        padding = kernel.shape[-1] // 2
+
+        # Expand kernel for all channels
+        kernel_conv = kernel.unsqueeze(0).unsqueeze(0).repeat(num_channels, 1, 1, 1)
+
+        if mode == 'dilate':
+            # Dilation = max pooling with kernel
+            result = F.conv2d(image, kernel_conv, padding=padding, groups=num_channels)
+            result = torch.clamp(result * 2.0, 0, 1)
+        elif mode == 'erode':
+            # Erosion = min pooling with kernel
+            inverted = 1.0 - image
+            result = F.conv2d(inverted, kernel_conv, padding=padding, groups=num_channels)
+            result = torch.clamp(result * 2.0, 0, 1)
+            result = 1.0 - result
+        else:
+            result = image
+
+        return result
+
+    def _dilate(self, image: torch.Tensor, iterations: float, kernel_size: int) -> torch.Tensor:
+        """Apply dilation multiple times"""
+        if iterations <= 0:
+            return image
+
+        kernel = self._create_morphology_kernel(kernel_size)
+        result = image.clone()
+
+        # Apply dilation iterations
+        num_iterations = int(iterations)
+        for _ in range(num_iterations):
+            result = self._apply_morphology_kernel(result, kernel, 'dilate')
+
+        # Fractional iteration (blend)
+        frac = iterations - num_iterations
+        if frac > 0:
+            dilated = self._apply_morphology_kernel(result, kernel, 'dilate')
+            result = (1 - frac) * result + frac * dilated
+
+        return torch.clamp(result, 0, 1)
+
+    def _erode(self, image: torch.Tensor, iterations: float, kernel_size: int) -> torch.Tensor:
+        """Apply erosion multiple times"""
+        if iterations <= 0:
+            return image
+
+        kernel = self._create_morphology_kernel(kernel_size)
+        result = image.clone()
+
+        # Apply erosion iterations
+        num_iterations = int(iterations)
+        for _ in range(num_iterations):
+            result = self._apply_morphology_kernel(result, kernel, 'erode')
+
+        # Fractional iteration (blend)
+        frac = iterations - num_iterations
+        if frac > 0:
+            eroded = self._apply_morphology_kernel(result, kernel, 'erode')
+            result = (1 - frac) * result + frac * eroded
+
+        return torch.clamp(result, 0, 1)
 
     def _get_previous_data(self):
         """Get previous frame image data from pipeline"""
@@ -398,6 +507,22 @@ class FeedbackTransformPreprocessor(PipelineAwareProcessor):
 
         # STEP 1: Apply color correction to prev_output FIRST
         prev_output_tensor = self._apply_color_correction_tensor(prev_output_tensor)
+
+        # STEP 1.5: Apply morphology to color-corrected prev_output (BEFORE transforms)
+        if self.dilate_amount > 0 or self.erode_amount > 0:
+            # Add batch dimension for morphology
+            prev_batch = prev_output_tensor.unsqueeze(0) if prev_output_tensor.dim() == 3 else prev_output_tensor
+
+            # Apply dilate first (expands bright areas)
+            if self.dilate_amount > 0:
+                prev_batch = self._dilate(prev_batch, self.dilate_amount, self.kernel_size)
+
+            # Then apply erode (contracts bright areas)
+            if self.erode_amount > 0:
+                prev_batch = self._erode(prev_batch, self.erode_amount, self.kernel_size)
+
+            # Remove batch dimension if it was added
+            prev_output_tensor = prev_batch.squeeze(0) if prev_output_tensor.dim() == 3 else prev_batch
 
         # Convert input image to tensor
         input_tensor = self.pil_to_tensor(image).squeeze(0)  # Remove batch dim [C, H, W]

@@ -13,14 +13,12 @@ from .ipadapter_embedding import IPAdapterEmbeddingPreprocessor
 from .faceid_embedding import FaceIDEmbeddingPreprocessor
 from .feedback import FeedbackPreprocessor
 from .feedback_transform import FeedbackTransformPreprocessor
-from .latent_feedback import LatentFeedbackPreprocessor
 from .sharpen import SharpenPreprocessor
 from .upscale import UpscalePreprocessor
 from .blur import BlurPreprocessor
 from .realesrgan_trt import RealESRGANProcessor
 from .post_process_color import PostProcessColorPreprocessor
 from .post_process_sharpen_noise import PostProcessSharpenNoisePreprocessor
-from .preprocess_color import PreprocessColorPreprocessor
 from .preprocess_sharpen_noise import PreprocessSharpenNoisePreprocessor
 
 # Try to import TensorRT preprocessors - might not be available on all systems
@@ -72,14 +70,12 @@ _preprocessor_registry = {
     "hed": HEDPreprocessor,
     "feedback": FeedbackPreprocessor,
     "feedback_transform": FeedbackTransformPreprocessor,
-    "latent_feedback": LatentFeedbackPreprocessor,
     "sharpen": SharpenPreprocessor,
     "upscale": UpscalePreprocessor,
     "blur": BlurPreprocessor,
     "realesrgan_trt": RealESRGANProcessor,
     "post_process_color": PostProcessColorPreprocessor,
     "post_process_sharpen_noise": PostProcessSharpenNoisePreprocessor,
-    "preprocess_color": PreprocessColorPreprocessor,
     "preprocess_sharpen_noise": PreprocessSharpenNoisePreprocessor,
 }
 
@@ -178,10 +174,8 @@ __all__ = [
     "FaceIDEmbeddingPreprocessor",
     "FeedbackPreprocessor",
     "FeedbackTransformPreprocessor",
-    "LatentFeedbackPreprocessor",
     "PostProcessColorPreprocessor",
     "PostProcessSharpenNoisePreprocessor",
-    "PreprocessColorPreprocessor",
     "PreprocessSharpenNoisePreprocessor",
     "get_preprocessor",
     "get_preprocessor_class",

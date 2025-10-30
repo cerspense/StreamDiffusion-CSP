@@ -28,13 +28,14 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
     1. Get previous frame's output image (prev_image_result) from VAE decode
     2. Convert from [-1, 1] to [0, 1] range
     3. Apply color correction to previous output (brightness/contrast/saturation/etc)
-    4. Apply geometric transforms to color-corrected previous (zoom/pan/rotate)
+    4. Apply geometric transforms to color-corrected previous (scale_x/scale_y/pan/rotate)
     5. Blend corrected+transformed previous with current input (feedback_strength controls mix)
     6. Clamp to [0, 1] and send to VAE encode
 
     Examples:
     - brightness=-0.1, feedback_strength=0.8: Correct VAE brightness bias with strong feedback
-    - zoom=1.05, saturation=1.2, feedback_strength=0.8: Zoom with saturated feedback
+    - scale_x=1.05, scale_y=1.05, saturation=1.2, feedback_strength=0.8: Zoom with saturated feedback
+    - scale_x=1.1, scale_y=1.0, feedback_strength=0.8: Horizontal stretch effect
     - pan_x=0.01, contrast=1.1, feedback_strength=0.5: Panning with punchy blend
 
     CRITICAL: Requires requires_sync_processing=true to avoid 1-frame delay!
@@ -99,12 +100,19 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
                     "step": 0.01,
                     "description": "Color temperature applied to feedback (-1.0 = cooler/blue, 0.0 = neutral, 1.0 = warmer/orange)"
                 },
-                "zoom": {
+                "scale_x": {
                     "type": "float",
                     "default": 1.0,
                     "range": [0.75, 1.5],
                     "step": 0.01,
-                    "description": "Zoom factor (1.0 = no zoom, >1.0 = zoom in, <1.0 = zoom out)"
+                    "description": "Horizontal scale factor (1.0 = no scale, >1.0 = zoom in, <1.0 = zoom out)"
+                },
+                "scale_y": {
+                    "type": "float",
+                    "default": 1.0,
+                    "range": [0.75, 1.5],
+                    "step": 0.01,
+                    "description": "Vertical scale factor (1.0 = no scale, >1.0 = zoom in, <1.0 = zoom out)"
                 },
                 "pan_x": {
                     "type": "float",
@@ -152,7 +160,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
                  black_level: float = 0.0,
                  gamma: float = 1.0,
                  temperature: float = 0.0,
-                 zoom: float = 1.0,
+                 scale_x: float = 1.0,
+                 scale_y: float = 1.0,
                  pan_x: float = 0.0,
                  pan_y: float = 0.0,
                  rotation: float = 0.0,
@@ -171,7 +180,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
             black_level: Black level lift applied to feedback (0.0 to 0.3)
             gamma: Gamma correction applied to feedback (0.5 to 2.0)
             temperature: Color temperature applied to feedback (-1.0 to 1.0)
-            zoom: Zoom factor (1.0 = no zoom, >1.0 = zoom in, <1.0 = zoom out)
+            scale_x: Horizontal scale factor (1.0 = no scale, >1.0 = zoom in, <1.0 = zoom out)
+            scale_y: Vertical scale factor (1.0 = no scale, >1.0 = zoom in, <1.0 = zoom out)
             pan_x: Pan in X direction (normalized: -1.0 to 1.0 is full width)
             pan_y: Pan in Y direction (normalized: -1.0 to 1.0 is full height)
             rotation: Rotation angle in degrees (positive = clockwise)
@@ -188,7 +198,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
             black_level=black_level,
             gamma=gamma,
             temperature=temperature,
-            zoom=zoom,
+            scale_x=scale_x,
+            scale_y=scale_y,
             pan_x=pan_x,
             pan_y=pan_y,
             rotation=rotation,
@@ -202,7 +213,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
         self.black_level = black_level
         self.gamma = gamma
         self.temperature = temperature
-        self.zoom = zoom
+        self.scale_x = scale_x
+        self.scale_y = scale_y
         self.pan_x = pan_x
         self.pan_y = pan_y
         self.rotation = rotation
@@ -234,7 +246,7 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
         """
         Create affine transformation grid for grid_sample
 
-        Combines zoom, pan, and rotation into a single affine matrix.
+        Combines scale_x, scale_y, pan, and rotation into a single affine matrix.
 
         Args:
             batch_size: Batch size
@@ -252,14 +264,15 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
         sin_theta = torch.sin(angle_rad)
 
         # Build transformation matrix components
-        # Zoom: scale = 1/zoom (because we're transforming sampling grid, not image)
-        scale = 1.0 / self.zoom
+        # Scale: scale = 1/scale (because we're transforming sampling grid, not image)
+        scale_x = 1.0 / self.scale_x
+        scale_y = 1.0 / self.scale_y
 
-        # Rotation matrix (around center)
-        a = scale * cos_theta
-        b = scale * -sin_theta
-        c = scale * sin_theta
-        d = scale * cos_theta
+        # Rotation matrix (around center) with independent x/y scaling
+        a = scale_x * cos_theta
+        b = scale_x * -sin_theta
+        c = scale_y * sin_theta
+        d = scale_y * cos_theta
 
         # Translation (pan)
         # Normalize pan to grid coordinates [-1, 1]
@@ -415,7 +428,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
 
         # STEP 2: Check if any transform is active
         needs_transform = (
-            abs(self.zoom - 1.0) > 1e-6 or
+            abs(self.scale_x - 1.0) > 1e-6 or
+            abs(self.scale_y - 1.0) > 1e-6 or
             abs(self.pan_x) > 1e-6 or
             abs(self.pan_y) > 1e-6 or
             abs(self.rotation) > 1e-3
@@ -528,7 +542,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
 
         # STEP 2: Check if any transform is active
         needs_transform = (
-            abs(self.zoom - 1.0) > 1e-6 or
+            abs(self.scale_x - 1.0) > 1e-6 or
+            abs(self.scale_y - 1.0) > 1e-6 or
             abs(self.pan_x) > 1e-6 or
             abs(self.pan_y) > 1e-6 or
             abs(self.rotation) > 1e-3

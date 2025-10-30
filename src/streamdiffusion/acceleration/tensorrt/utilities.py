@@ -75,14 +75,23 @@ torch_to_numpy_dtype_dict = {value: key for (key, value) in numpy_to_torch_dtype
 
 
 def CUASSERT(cuda_ret):
-    err = cuda_ret[0]
-    if err != cudart.cudaError_t.cudaSuccess:
-        raise RuntimeError(
-            f"CUDA ERROR: {err}, error code reference: https://nvidia.github.io/cuda-python/module/cudart.html#cuda.cudart.cudaError_t"
-        )
-    if len(cuda_ret) > 1:
-        return cuda_ret[1]
-    return None
+    # Handle both CUDA 11 (returns tuple) and CUDA 12+ (may return just error code)
+    if isinstance(cuda_ret, tuple):
+        err = cuda_ret[0]
+        if err != cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(
+                f"CUDA ERROR: {err}, error code reference: https://nvidia.github.io/cuda-python/module/cudart.html#cuda.cudart.cudaError_t"
+            )
+        if len(cuda_ret) > 1:
+            return cuda_ret[1]
+        return None
+    else:
+        # CUDA 12+ may return error code directly (not a tuple)
+        if cuda_ret != cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(
+                f"CUDA ERROR: {cuda_ret}, error code reference: https://nvidia.github.io/cuda-python/module/cudart.html#cuda.cudart.cudaError_t"
+            )
+        return None
 
 
 class Engine:
@@ -381,7 +390,22 @@ class Engine:
                 )
                 self.context.execute_async_v3(stream.ptr)
                 self.graph = CUASSERT(cudart.cudaStreamEndCapture(stream.ptr))
-                self.cuda_graph_instance = CUASSERT(cudart.cudaGraphInstantiate(self.graph, 0))
+                # CUDA 12+ API: cudaGraphInstantiate signature changed
+                # Old: cudaGraphInstantiate(graph, flags) -> (instance, error)
+                # New: cudaGraphInstantiate(graph, pErrorNode, logBuffer, bufferSize) -> (error, instance, ...)
+                # Workaround: Use cudaGraphInstantiateWithFlags instead which has stable API
+                try:
+                    # Try new CUDA 12+ API
+                    result = cudart.cudaGraphInstantiateWithFlags(self.graph, 0)
+                    if isinstance(result, tuple):
+                        error = result[0]
+                        self.cuda_graph_instance = result[1]
+                        CUASSERT(error)
+                    else:
+                        self.cuda_graph_instance = CUASSERT(result)
+                except AttributeError:
+                    # Fall back to old API for CUDA 11
+                    self.cuda_graph_instance = CUASSERT(cudart.cudaGraphInstantiate(self.graph, 0))
         else:
             noerror = self.context.execute_async_v3(stream.ptr)
             if not noerror:

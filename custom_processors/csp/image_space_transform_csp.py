@@ -29,7 +29,7 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
     2. Convert from [-1, 1] to [0, 1] range
     3. Apply color correction to previous output (brightness/contrast/saturation/etc)
     4. Apply geometric transforms to color-corrected previous (scale_x/scale_y/pan/rotate)
-    5. Blend corrected+transformed previous with current input (feedback_strength controls mix)
+    5. Blend corrected+transformed previous with current input (blend_mode + feedback_strength)
     6. Clamp to [0, 1] and send to VAE encode
 
     Examples:
@@ -37,6 +37,9 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
     - scale_x=1.05, scale_y=1.05, saturation=1.2, feedback_strength=0.8: Zoom with saturated feedback
     - scale_x=1.1, scale_y=1.0, feedback_strength=0.8: Horizontal stretch effect
     - pan_x=0.01, contrast=1.1, feedback_strength=0.5: Panning with punchy blend
+    - blend_mode="add", feedback_strength=0.3: Additive feedback (trails/echo effect)
+    - blend_mode="multiply", feedback_strength=0.7: Darkening feedback accumulation
+    - blend_mode="difference", feedback_strength=0.5: Psychedelic XOR-like effect
 
     CRITICAL: Requires requires_sync_processing=true to avoid 1-frame delay!
     """
@@ -140,6 +143,12 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
                     "default": "zeros",
                     "options": ["zeros", "border", "reflection"],
                     "description": "How to handle borders: zeros (black), border (edge repeat), reflection (mirror)"
+                },
+                "blend_mode": {
+                    "type": "string",
+                    "default": "linear",
+                    "options": ["linear", "add", "multiply", "screen", "overlay", "difference"],
+                    "description": "Blend mode: linear (normal mix), add (additive), multiply (darken), screen (lighten), overlay (contrast), difference (XOR-like)"
                 }
             },
             "use_cases": [
@@ -166,6 +175,7 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
                  pan_y: float = 0.0,
                  rotation: float = 0.0,
                  border_mode: Literal["zeros", "border", "reflection"] = "zeros",
+                 blend_mode: Literal["linear", "add", "multiply", "screen", "overlay", "difference"] = "linear",
                  **kwargs):
         """
         Initialize feedback transform preprocessor
@@ -186,6 +196,7 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
             pan_y: Pan in Y direction (normalized: -1.0 to 1.0 is full height)
             rotation: Rotation angle in degrees (positive = clockwise)
             border_mode: How to handle borders ("zeros", "border", "reflection")
+            blend_mode: Blend mode for feedback ("linear", "add", "multiply", "screen", "overlay", "difference")
             **kwargs: Additional parameters passed to BasePreprocessor
         """
         super().__init__(
@@ -204,6 +215,7 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
             pan_y=pan_y,
             rotation=rotation,
             border_mode=border_mode,
+            blend_mode=blend_mode,
             **kwargs
         )
         self.feedback_strength = max(0.0, min(1.0, feedback_strength))  # Clamp to [0, 1]
@@ -219,6 +231,7 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
         self.pan_y = pan_y
         self.rotation = rotation
         self.border_mode = border_mode
+        self.blend_mode = blend_mode
         self._first_frame = True
 
         # Map border_mode to grid_sample padding mode
@@ -292,6 +305,60 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
         grid = F.affine_grid(theta, [batch_size, channels, height, width], align_corners=False)
 
         return grid
+
+    def _apply_blend_mode(self, input_tensor: torch.Tensor, feedback_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Apply blend mode between input and feedback tensors
+
+        Args:
+            input_tensor: Current input tensor [C, H, W] or [B, C, H, W] in range [0, 1]
+            feedback_tensor: Feedback tensor (transformed previous) [C, H, W] or [B, C, H, W] in range [0, 1]
+
+        Returns:
+            Blended tensor in range [0, 1]
+        """
+        if self.blend_mode == "linear":
+            # Standard linear interpolation
+            result = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * feedback_tensor
+
+        elif self.blend_mode == "add":
+            # Additive blending - feedback is added on top of input
+            # feedback_strength controls the intensity of the addition
+            result = input_tensor + self.feedback_strength * feedback_tensor
+
+        elif self.blend_mode == "multiply":
+            # Multiply blending - darkens the image
+            # Interpolate between input and input*feedback
+            multiplied = input_tensor * feedback_tensor
+            result = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * multiplied
+
+        elif self.blend_mode == "screen":
+            # Screen blending - lightens the image (opposite of multiply)
+            # Screen formula: 1 - (1-A)*(1-B)
+            screened = 1.0 - (1.0 - input_tensor) * (1.0 - feedback_tensor)
+            result = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * screened
+
+        elif self.blend_mode == "overlay":
+            # Overlay blending - increases contrast
+            # Combines multiply and screen based on input brightness
+            multiplied = 2.0 * input_tensor * feedback_tensor
+            screened = 1.0 - 2.0 * (1.0 - input_tensor) * (1.0 - feedback_tensor)
+            # Use multiply for dark areas (< 0.5), screen for bright areas (>= 0.5)
+            overlay = torch.where(input_tensor < 0.5, multiplied, screened)
+            result = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * overlay
+
+        elif self.blend_mode == "difference":
+            # Difference blending - creates XOR-like effects
+            # Absolute difference between input and feedback
+            diff = torch.abs(input_tensor - feedback_tensor)
+            result = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * diff
+
+        else:
+            # Fallback to linear if unknown mode
+            result = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * feedback_tensor
+
+        # Clamp result to valid range [0, 1]
+        return result.clamp(0, 1)
 
     def _apply_color_correction_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -471,11 +538,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
             )
             transformed_prev = transformed_prev.squeeze(0)  # Remove batch
 
-        # STEP 4: Blend color-corrected+transformed previous with input (feedback_strength controls mix)
-        blended_tensor = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * transformed_prev
-
-        # CRITICAL: Clamp to [0, 1] to prevent color space drift/accumulation
-        blended_tensor = blended_tensor.clamp(0, 1)
+        # STEP 4: Blend color-corrected+transformed previous with input using selected blend mode
+        blended_tensor = self._apply_blend_mode(input_tensor, transformed_prev)
 
         # Convert back to PIL
         blended_pil = self.tensor_to_pil(blended_tensor)
@@ -592,11 +656,8 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
                 if transformed_prev.shape[0] == 1:
                     transformed_prev = transformed_prev.squeeze(0)
 
-        # STEP 4: Blend color-corrected+transformed previous with input (feedback_strength controls mix)
-        blended_tensor = (1 - self.feedback_strength) * input_tensor + self.feedback_strength * transformed_prev
-
-        # CRITICAL: Clamp to [0, 1] to prevent color space drift/accumulation
-        blended_tensor = blended_tensor.clamp(0, 1)
+        # STEP 4: Blend color-corrected+transformed previous with input using selected blend mode
+        blended_tensor = self._apply_blend_mode(input_tensor, transformed_prev)
 
         # CRITICAL FIX: Convert back to [-1, 1] range for VAE encoder
         # Pipeline expects input in [-1, 1] range (black=-1, gray=0, white=1)

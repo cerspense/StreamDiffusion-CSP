@@ -223,5 +223,21 @@ controlnet_test_*
 # Demo uploads directory
 demo/realtime-img2img/uploads/
 
+# Custom processors
 custom_processors/*
 !custom_processors/README.md
+
+# Debug output directory
+debug_frames/
+
+# Ignore all StreamDiffusionTD files except StreamDiffusionExt.py
+StreamDiffusionTD/*
+!StreamDiffusionTD/StreamDiffusionExt.py
+
+# Ignore installer/setup scripts
+Install_StreamDiffusion.bat
+Install_TensorRT.bat
+Start_StreamDiffusion.bat
+
+# Ignore version files
+3.20.2

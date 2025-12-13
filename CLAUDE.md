@@ -1199,6 +1199,17 @@ Start_StreamDiffusion_DebugCapture.bat
 - **Plugin README:** `custom_processors/README.md`
 - **Pipeline:** `src/streamdiffusion/pipeline.py`
 
+### Documentation & Progress Tracking
+- **Implementation Plan:** `docs/implementation_plan.md` - High-level roadmap with phases and status
+- **Devlogs:** `docs/devlogs/` - Detailed journals of what was built, bugs fixed, decisions made
+- **Blackwell Setup Report:** `BLACKWELL_SETUP_REPORT.md` - RTX 5090 / CUDA 12.8 / PyTorch 2.9 compatibility notes
+
+**When picking up work:**
+1. Read `docs/implementation_plan.md` for current status
+2. Check recent devlogs in `docs/devlogs/` for context
+3. Update devlog as you work
+4. Mark tasks complete in implementation plan when done
+
 ### TouchDesigner Integration (if using StreamDiffusionTD)
 - **TD Extension:** `StreamDiffusionTD/StreamDiffusionExt.py` (external to repo)
 - **OSC Handler:** `StreamDiffusionTD/td_osc_handler.py`

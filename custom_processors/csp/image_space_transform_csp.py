@@ -234,13 +234,20 @@ class ImageSpaceTransformCspPreprocessor(PipelineAwareProcessor):
         self.blend_mode = blend_mode
         self._first_frame = True
 
-        # Map border_mode to grid_sample padding mode
-        self._padding_mode_map = {
+    @property
+    def _padding_mode(self) -> str:
+        """
+        Dynamically compute padding mode from border_mode.
+
+        This ensures OSC updates to border_mode are immediately reflected
+        in grid_sample calls without needing to rebuild the processor.
+        """
+        padding_mode_map = {
             "zeros": "zeros",
             "border": "border",
             "reflection": "reflection"
         }
-        self._padding_mode = self._padding_mode_map.get(border_mode, "zeros")
+        return padding_mode_map.get(self.border_mode, "zeros")
 
     def reset(self):
         """Reset the processor state (useful for new sequences)"""

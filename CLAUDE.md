@@ -1290,6 +1290,54 @@ if 'my_data' in self.pipeline_ref.custom_state:
 
 ---
 
+## ⚠️ CRITICAL: Virtual Environment and Engine Management
+
+**IMPORTANT RULES - ALWAYS FOLLOW THESE:**
+
+### 1. ALWAYS USE THE VENV (Virtual Environment)
+- **NEVER** use the system Python installation for troubleshooting or running StreamDiffusion
+- **ALWAYS** use `venv/Scripts/python.exe` or activate the venv with `venv\Scripts\activate.bat`
+- The venv is located at: `venv\` (in the project root)
+- All packages must be installed in the venv, not the system Python
+
+### 2. NEVER DELETE ENGINE FILES
+- Engine files are located in `./engines/td/` directory
+- These files take 10-15 minutes to build and represent significant compilation work
+- **DO NOT** delete or modify engine files unless absolutely necessary
+- Engine files are automatically cached and reused
+- If engines need to be rebuilt, the system will do so automatically when needed
+
+### 3. Virtual Environment Commands
+```bash
+# To reinstall packages in venv
+venv/Scripts/pip.exe install <package>
+
+# To run TensorRT install script
+venv/Scripts/python.exe streamdiffusionTD/install_tensorrt.py
+
+# To run StreamDiffusion
+venv/Scripts/python.exe streamdiffusionTD/td_main.py
+
+# The batch file automatically uses the venv
+Start_StreamDiffusion.bat
+```
+
+### 4. Required venv Packages
+- streamdiffusion (installed with `pip install -e .`)
+- tensorrt-cu12
+- nvidia-cudnn-cu12
+- polygraphy
+- onnx-graphsurgeon
+- All other dependencies from requirements
+
+### 5. TensorRT Engine Build Times
+- Small models (VAE): < 1 minute
+- Large models (SDXL UNet with IP-Adapter): 10-15 minutes
+- **Engines are cached in `./engines/td/` and only rebuilt when model or configuration changes**
+- **NEVER delete engine files unless you want to wait 10-15 minutes for rebuild**
+
+---
+
 ## Conclusion
 
 The Fx Dynamic Pipeline Processors system provides a **powerful, extensible architecture** for real-time image and latent manipulation in StreamDiffusion. By following the patterns in this guide, you can create sophisticated processors that integrate seamlessly with TouchDesigner.

@@ -597,7 +597,8 @@ def export_onnx(
         # Determine if we need external data format for large models (like SDXL)
         is_large_model = is_sdxl or (hasattr(model, 'config') and getattr(model.config, 'sample_size', 32) >= 64)
         
-        # Export ONNX normally first
+        # Export ONNX using legacy TorchScript-based exporter
+        # PyTorch 2.9+ uses torch.export by default which has compatibility issues
         torch.onnx.export(
             wrapped_model,
             inputs,
@@ -608,6 +609,7 @@ def export_onnx(
             input_names=model_data.get_input_names(),
             output_names=model_data.get_output_names(),
             dynamic_axes=model_data.get_dynamic_axes(),
+            dynamo=False,  # Force legacy TorchScript-based exporter
         )
         
         # Convert to external data format for large models (SDXL)

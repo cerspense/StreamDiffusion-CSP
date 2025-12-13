@@ -54,8 +54,11 @@ class Optimizer:
     def infer_shapes(self, return_onnx=False):
         onnx_graph = gs.export_onnx(self.graph)
         if onnx_graph.ByteSize() > 2147483648:
-            print(f"⚠️ Model size ({onnx_graph.ByteSize() / (1024**3):.2f} GB) exceeds 2GB - this is normal for SDXL models")
-            print("🔧 ONNX shape inference will be skipped for large models to avoid memory issues")
+            # Use logger instead of print to avoid Windows console encoding issues
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Model size ({onnx_graph.ByteSize() / (1024**3):.2f} GB) exceeds 2GB - this is normal for SDXL models")
+            logger.info("ONNX shape inference will be skipped for large models to avoid memory issues")
             # For large models like SDXL, skip shape inference to avoid memory/size issues
             # The model will still work with TensorRT's own shape inference during engine building
         else:

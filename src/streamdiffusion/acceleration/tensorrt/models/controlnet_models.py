@@ -109,14 +109,19 @@ class ControlNetTRT(BaseModel):
         latent_height = image_height // 8
         latent_width = image_width // 8
         dtype = torch.float16 if self.fp16 else torch.float32
-        
+
+        # Ensure required attributes have valid values (defensive programming for ONNX export)
+        unet_dim = getattr(self, 'unet_dim', 4)
+        embedding_dim = getattr(self, 'embedding_dim', 768)  # SD1.5 default
+        conditioning_channels = getattr(self, 'conditioning_channels', 3)
+
         return (
-            torch.randn(batch_size, self.unet_dim, latent_height, latent_width, 
+            torch.randn(batch_size, unet_dim, latent_height, latent_width,
                        dtype=dtype, device=self.device),
             torch.ones(batch_size, dtype=torch.float32, device=self.device),
-            torch.randn(batch_size, 77, self.embedding_dim, 
+            torch.randn(batch_size, 77, embedding_dim,
                        dtype=dtype, device=self.device),
-            torch.randn(batch_size, self.conditioning_channels, image_height, image_width, 
+            torch.randn(batch_size, conditioning_channels, image_height, image_width,
                        dtype=dtype, device=self.device)
         )
 
@@ -213,21 +218,27 @@ class ControlNetSDXLTRT(ControlNetTRT):
         """Override to provide SDXL-specific sample tensors with correct input format"""
         latent_height, latent_width = self.check_dims(batch_size, image_height, image_width)
         dtype = torch.float16 if self.fp16 else torch.float32
-        
+
+        # Ensure required attributes have valid values (defensive programming for ONNX export)
+        text_maxlen = getattr(self, 'text_maxlen', 77)
+        embedding_dim = getattr(self, 'embedding_dim', 2048)  # SDXL default
+        unet_dim = getattr(self, 'unet_dim', 4)
+        conditioning_channels = getattr(self, 'conditioning_channels', 3)
+
         # SDXL ControlNet inputs (wrapper expects 7 inputs including SDXL conditioning)
         base_inputs = (
-            torch.randn(batch_size, self.unet_dim, latent_height, latent_width, 
+            torch.randn(batch_size, unet_dim, latent_height, latent_width,
                        dtype=dtype, device=self.device),  # sample
             torch.ones(batch_size, dtype=torch.float32, device=self.device),  # timestep
-            torch.randn(batch_size, self.text_maxlen, self.embedding_dim, 
+            torch.randn(batch_size, text_maxlen, embedding_dim,
                        dtype=dtype, device=self.device),  # encoder_hidden_states
-            torch.randn(batch_size, self.conditioning_channels, image_height, image_width, 
+            torch.randn(batch_size, conditioning_channels, image_height, image_width,
                        dtype=dtype, device=self.device),  # controlnet_cond
             torch.tensor(1.0, dtype=torch.float32, device=self.device),  # conditioning_scale
             torch.randn(batch_size, 1280, dtype=dtype, device=self.device),  # text_embeds
             torch.randn(batch_size, 6, dtype=dtype, device=self.device),     # time_ids
         )
-        
+
         return base_inputs
     
     def get_input_names(self):

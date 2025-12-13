@@ -1045,20 +1045,55 @@ class StreamParameterUpdater(OrchestratorUser):
         # Recompute blended noise
         self._apply_seed_blending(interpolation_method)
 
+    # ControlNet model ID aliases - maps short names to full HuggingFace paths
+    # This allows TouchDesigner to send simple names like "canny" instead of full paths
+    CONTROLNET_MODEL_ALIASES = {
+        # SDXL ControlNets
+        "canny": "diffusers/controlnet-canny-sdxl-1.0",
+        "canny-sdxl": "diffusers/controlnet-canny-sdxl-1.0",
+        "depth": "diffusers/controlnet-depth-sdxl-1.0",
+        "depth-sdxl": "diffusers/controlnet-depth-sdxl-1.0",
+        "openpose": "thibaud/controlnet-openpose-sdxl-1.0",
+        "openpose-sdxl": "thibaud/controlnet-openpose-sdxl-1.0",
+        # SD 1.5 ControlNets (common ones)
+        "canny-sd15": "lllyasviel/control_v11p_sd15_canny",
+        "depth-sd15": "lllyasviel/control_v11f1p_sd15_depth",
+        "openpose-sd15": "lllyasviel/control_v11p_sd15_openpose",
+        "lineart-sd15": "lllyasviel/control_v11p_sd15_lineart",
+        "softedge-sd15": "lllyasviel/control_v11p_sd15_softedge",
+    }
+
+    def _resolve_controlnet_model_id(self, model_id: str) -> str:
+        """Resolve a ControlNet model ID alias to full HuggingFace path."""
+        if model_id is None:
+            return model_id
+        # Check if it's an alias (case-insensitive)
+        resolved = self.CONTROLNET_MODEL_ALIASES.get(model_id.lower())
+        if resolved:
+            logger.debug(f"_resolve_controlnet_model_id: Resolved alias '{model_id}' → '{resolved}'")
+            return resolved
+        # Return as-is if not an alias (already a full path)
+        return model_id
+
     def _update_controlnet_config(self, desired_config: List[Dict[str, Any]]) -> None:
         """
         Update ControlNet configuration by diffing current vs desired state.
-        
+
         Args:
             desired_config: Complete ControlNet configuration list defining the desired state.
                            Each dict contains: model_id, preprocessor, conditioning_scale, enabled, etc.
         """
+        # Resolve any model ID aliases to full HuggingFace paths
+        for cfg in desired_config:
+            if 'model_id' in cfg:
+                cfg['model_id'] = self._resolve_controlnet_model_id(cfg['model_id'])
+
         # Find the ControlNet pipeline/module (module-aware)
         controlnet_pipeline = self._get_controlnet_pipeline()
         if not controlnet_pipeline:
             logger.warning(f"_update_controlnet_config: No ControlNet pipeline found")
             return
-        
+
         current_config = self._get_current_controlnet_config()
         
         # Simple approach: detect what changed and apply minimal updates

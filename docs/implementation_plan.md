@@ -20,9 +20,12 @@
 - [x] ControlNet TensorRT model `get_sample_input` defensive fixes
 - [x] ControlNet model ID alias system for OSC compatibility
 - [x] Config updated with full HuggingFace model paths
+- [x] SDXL Lineart ControlNet aliases (MistoLine, LineartXL, promeai)
+- [x] fp16 variant loading support for community ControlNet models
 
 ### In Progress
 - [ ] ControlNet disable/enable toggle error investigation
+- [ ] Performance testing: ControlNet vs non-ControlNet engines
 
 ### Outstanding
 - [ ] ControlNet TensorRT engine compilation (currently using PyTorch fallback)
@@ -33,4 +36,4 @@
 - **CUDA**: 12.8
 - **PyTorch**: 2.9.0+cu128
 - **TensorRT**: 10.13.3.9
-- **Model**: SDXL-Turbo with ControlNet (Canny)
+- **Model**: SDXL-Turbo with ControlNet (Canny, Lineart/MistoLine)

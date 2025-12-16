@@ -609,7 +609,14 @@ class ControlNetModule(OrchestratorUser):
                         repo_id, subfolder=subfolder, **load_kwargs
                     )
                 else:
-                    controlnet = ControlNetModel.from_pretrained(model_id, **load_kwargs)
+                    # Try loading with fp16 variant first (many community models use this)
+                    try:
+                        controlnet = ControlNetModel.from_pretrained(model_id, variant="fp16", **load_kwargs)
+                        logger.info(f"ControlNetModule._load_pytorch_controlnet_model: Loaded {model_id} with fp16 variant")
+                    except Exception as variant_err:
+                        # Fallback to standard loading without variant
+                        logger.debug(f"ControlNetModule._load_pytorch_controlnet_model: fp16 variant not found, trying standard: {variant_err}")
+                        controlnet = ControlNetModel.from_pretrained(model_id, **load_kwargs)
             controlnet = controlnet.to(device=self.device, dtype=self.dtype)
             # Track model_id for updater diffing
             try:

@@ -1055,6 +1055,12 @@ class StreamParameterUpdater(OrchestratorUser):
         "depth-sdxl": "diffusers/controlnet-depth-sdxl-1.0",
         "openpose": "thibaud/controlnet-openpose-sdxl-1.0",
         "openpose-sdxl": "thibaud/controlnet-openpose-sdxl-1.0",
+        # SDXL Lineart ControlNets
+        "lineart": "TheMistoAI/MistoLine",  # Most versatile - works with any line art type
+        "lineart-sdxl": "TheMistoAI/MistoLine",
+        "mistoline": "TheMistoAI/MistoLine",
+        "lineart-anime-sdxl": "kataragi/ControlNet-LineartXL",  # Best for anime colorization
+        "lineart-promeai": "promeai/sdxl-controlnet-lineart-promeai",  # Trained on real images
         # SD 1.5 ControlNets (common ones)
         "canny-sd15": "lllyasviel/control_v11p_sd15_canny",
         "depth-sd15": "lllyasviel/control_v11f1p_sd15_depth",
